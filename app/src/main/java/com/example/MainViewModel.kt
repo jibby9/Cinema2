@@ -29,12 +29,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _showDebugPanel = MutableStateFlow(true)
     val showDebugPanel: StateFlow<Boolean> = _showDebugPanel.asStateFlow()
 
+    private val _isEditMode = MutableStateFlow(false)
+    val isEditMode: StateFlow<Boolean> = _isEditMode.asStateFlow()
+
     // Themes states
     private val _activeThemeId = MutableStateFlow("cinema")
     val activeThemeId: StateFlow<String> = _activeThemeId.asStateFlow()
 
     private val _activeThemePreset = MutableStateFlow(ThemePresets.Cinema)
     val activeThemePreset: StateFlow<ThemePreset> = _activeThemePreset.asStateFlow()
+
+    private val _activeAspectRatioId = MutableStateFlow("free")
+    val activeAspectRatioId: StateFlow<String> = _activeAspectRatioId.asStateFlow()
 
     private val _screenLayout = MutableStateFlow(
         ScreenLayoutSettings(
@@ -67,12 +73,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
+            preferenceManager.selectedAspectRatioId.collect { id ->
+                _activeAspectRatioId.value = id
+            }
+        }
+
+        viewModelScope.launch {
             // Keep screen layout settings in sync with whichever theme is currently chosen
             _activeThemeId.collect { id ->
                 preferenceManager.getLayoutSettings(id).collect { settings ->
                     _screenLayout.value = settings
                 }
             }
+        }
+    }
+
+    fun toggleEditMode() {
+        _isEditMode.value = !_isEditMode.value
+    }
+
+    fun setEditMode(enabled: Boolean) {
+        _isEditMode.value = enabled
+    }
+
+    fun selectAspectRatio(id: String) {
+        viewModelScope.launch {
+            Log.d(TAG, "Selecting aspect ratio: $id")
+            preferenceManager.saveSelectedAspectRatio(id)
         }
     }
 

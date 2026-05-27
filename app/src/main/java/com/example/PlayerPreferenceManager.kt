@@ -13,6 +13,7 @@ class PlayerPreferenceManager(private val context: Context) {
 
     companion object {
         val KEY_SELECTED_THEME_ID = stringPreferencesKey("selected_theme_id")
+        val KEY_SELECTED_ASPECT_RATIO = stringPreferencesKey("selected_aspect_ratio")
 
         // Tema: Cinema positions
         val KEY_CINEMA_LEFT = floatPreferencesKey("cinema_left")
@@ -41,6 +42,13 @@ class PlayerPreferenceManager(private val context: Context) {
      */
     val selectedThemeId: Flow<String> = context.dataStore.data.map { preferences ->
         preferences[KEY_SELECTED_THEME_ID] ?: "cinema"
+    }
+
+    /**
+     * Emits the currently selected aspect ratio preset (defaults to "free").
+     */
+    val selectedAspectRatioId: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[KEY_SELECTED_ASPECT_RATIO] ?: "free"
     }
 
     /**
@@ -84,6 +92,15 @@ class PlayerPreferenceManager(private val context: Context) {
     suspend fun saveSelectedTheme(themeId: String) {
         context.dataStore.edit { preferences ->
             preferences[KEY_SELECTED_THEME_ID] = themeId
+        }
+    }
+
+    /**
+     * Saves the chosen aspect ratio preset.
+     */
+    suspend fun saveSelectedAspectRatio(aspectRatioId: String) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_SELECTED_ASPECT_RATIO] = aspectRatioId
         }
     }
 

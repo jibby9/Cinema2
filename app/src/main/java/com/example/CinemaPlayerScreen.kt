@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -22,6 +23,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -60,6 +63,8 @@ fun CinemaPlayerScreen(
     val activeThemeId by viewModel.activeThemeId.collectAsState()
     val activeThemePreset by viewModel.activeThemePreset.collectAsState()
     val screenLayout by viewModel.screenLayout.collectAsState()
+    val isEditMode by viewModel.isEditMode.collectAsState()
+    val activeAspectRatioId by viewModel.activeAspectRatioId.collectAsState()
 
     val clipboardManager = LocalClipboardManager.current
     val configuration = LocalConfiguration.current
@@ -109,6 +114,11 @@ fun CinemaPlayerScreen(
                             onPlayTestVideo = { viewModel.playTestVideo() },
                             onClearPlaySource = { viewModel.setPlayableUri(null) },
                             onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
+                            isEditMode = isEditMode,
+                            activeAspectRatioId = activeAspectRatioId,
+                            onLayoutChanged = { left, top, width, height ->
+                                viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
+                            },
                             modifier = Modifier
                                 .fillMaxSize()
                                 .weight(1f)
@@ -164,6 +174,11 @@ fun CinemaPlayerScreen(
                             onPlayTestVideo = { viewModel.playTestVideo() },
                             onClearPlaySource = { viewModel.setPlayableUri(null) },
                             onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
+                            isEditMode = isEditMode,
+                            activeAspectRatioId = activeAspectRatioId,
+                            onLayoutChanged = { left, top, width, height ->
+                                viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
+                            },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -299,13 +314,50 @@ fun CinemaTheaterLayout(
     onPlayTestVideo: () -> Unit,
     onClearPlaySource: () -> Unit,
     onPlaybackError: (String) -> Unit,
+    isEditMode: Boolean = false,
+    activeAspectRatioId: String = "free",
+    onLayoutChanged: (left: Float, top: Float, width: Float, height: Float) -> Unit = { _, _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
+    var canvasWidthPx by remember { mutableStateOf(1f) }
+    var canvasHeightPx by remember { mutableStateOf(1f) }
+
+    val aspectPreset = AspectRatioPreset.getById(activeAspectRatioId)
+    val ratio = aspectPreset.ratio
+
+    // Auto-enforce ratio when ratio changes or sizes change
+    LaunchedEffect(activeAspectRatioId, canvasWidthPx, canvasHeightPx) {
+        if (canvasWidthPx > 1f && canvasHeightPx > 1f && ratio != null) {
+            val currentW = screenLayout.width
+            val targetH = (currentW * canvasWidthPx) / (ratio * canvasHeightPx)
+
+            if (targetH > 1.0f - screenLayout.top) {
+                val maxH = (1.0f - screenLayout.top).coerceIn(0.10f, 1.0f)
+                val targetW = (maxH * canvasHeightPx * ratio) / canvasWidthPx
+                val clampedW = targetW.coerceIn(0.10f, 1.0f - screenLayout.left)
+                val finalH = (clampedW * canvasWidthPx) / (ratio * canvasHeightPx)
+                onLayoutChanged(screenLayout.left, screenLayout.top, clampedW, finalH)
+            } else if (targetH < 0.10f) {
+                val minH = 0.10f
+                val targetW = (minH * canvasHeightPx * ratio) / canvasWidthPx
+                val clampedW = targetW.coerceIn(0.10f, 1.0f - screenLayout.left)
+                val finalH = (clampedW * canvasWidthPx) / (ratio * canvasHeightPx)
+                onLayoutChanged(screenLayout.left, screenLayout.top, clampedW, finalH)
+            } else {
+                onLayoutChanged(screenLayout.left, screenLayout.top, currentW, targetH)
+            }
+        }
+    }
+
     BoxWithConstraints(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .border(2.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(12.dp))
-            .background(Color.Black),
+            .background(Color.Black)
+            .onGloballyPositioned { coordinates ->
+                canvasWidthPx = coordinates.size.width.toFloat()
+                canvasHeightPx = coordinates.size.height.toFloat()
+            },
         contentAlignment = Alignment.Center
     ) {
         val containerWidth = maxWidth
@@ -327,13 +379,34 @@ fun CinemaTheaterLayout(
         val playerWidth = containerWidth * screenLayout.width
         val playerHeight = containerHeight * screenLayout.height
 
+        val moveModifier = if (isEditMode) {
+            Modifier.pointerInput(canvasWidthPx, canvasHeightPx, screenLayout) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    val dX = dragAmount.x / canvasWidthPx
+                    val dY = dragAmount.y / canvasHeightPx
+
+                    val newLeft = (screenLayout.left + dX).coerceIn(0f, 1f - screenLayout.width)
+                    val newTop = (screenLayout.top + dY).coerceIn(0f, 1f - screenLayout.height)
+                    onLayoutChanged(newLeft, newTop, screenLayout.width, screenLayout.height)
+                }
+            }
+        } else {
+            Modifier
+        }
+
         Box(
             modifier = Modifier
                 .offset(x = playerLeft, y = playerTop)
                 .size(width = playerWidth, height = playerHeight)
                 .testTag("video_screen_container")
                 .clip(RoundedCornerShape(6.dp))
-                .border(2.dp, CinemaBevelCharcoal, RoundedCornerShape(6.dp))
+                .border(
+                    width = if (isEditMode) 2.5.dp else 2.dp,
+                    color = if (isEditMode) themePreset.primaryColor else CinemaBevelCharcoal,
+                    shape = RoundedCornerShape(6.dp)
+                )
+                .then(moveModifier)
                 .drawBehind {
                     // Soft neon corner glow
                     drawRect(
@@ -353,26 +426,28 @@ fun CinemaTheaterLayout(
                     headers = headers
                 )
 
-                // Close/Stop Overlay Button in corner
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(8.dp),
-                    contentAlignment = Alignment.TopEnd
-                ) {
-                    IconButton(
-                        onClick = onClearPlaySource,
-                        colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = Color.Black.copy(alpha = 0.65f)
-                        ),
-                        modifier = Modifier.size(32.dp)
+                // Close/Stop Overlay Button in corner (Hidden during edit mode)
+                if (!isEditMode) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(8.dp),
+                        contentAlignment = Alignment.TopEnd
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Stop streams",
-                            tint = Color.White,
-                            modifier = Modifier.size(15.dp)
-                        )
+                        IconButton(
+                            onClick = onClearPlaySource,
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = Color.Black.copy(alpha = 0.65f)
+                            ),
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Stop streams",
+                                tint = Color.White,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
                     }
                 }
             } else {
@@ -382,9 +457,187 @@ fun CinemaTheaterLayout(
                     primaryColor = themePreset.primaryColor
                 )
             }
+
+            if (isEditMode) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(themePreset.primaryColor.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.OpenWith,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "DRAG TO RE-POSITION",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.2.sp
+                            )
+                        )
+                    }
+                }
+            }
         }
 
-        // 4. Ambient information overlay caption
+        // 4. Custom Drag handles centered exactly over corners of player
+        if (isEditMode) {
+            // TOP-LEFT HANDLE
+            Box(
+                modifier = Modifier
+                    .offset(x = playerLeft - 24.dp, y = playerTop - 24.dp)
+                    .size(48.dp)
+                    .pointerInput(canvasWidthPx, canvasHeightPx, screenLayout, ratio) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            val dX = dragAmount.x / canvasWidthPx
+                            val dY = dragAmount.y / canvasHeightPx
+
+                            val fixedRight = screenLayout.left + screenLayout.width
+                            val fixedBottom = screenLayout.top + screenLayout.height
+
+                            val updated = checkRatioResizeTopLeft(
+                                newLeft = screenLayout.left + dX,
+                                newTop = screenLayout.top + dY,
+                                fixedRight = fixedRight,
+                                fixedBottom = fixedBottom,
+                                canvasWidth = canvasWidthPx,
+                                canvasHeight = canvasHeightPx,
+                                ratio = ratio
+                            )
+                            onLayoutChanged(updated.left, updated.top, updated.width, updated.height)
+                        }
+                    }
+                    .testTag("handle_top_left"),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .background(Color.White, CircleShape)
+                        .border(2.dp, themePreset.primaryColor, CircleShape)
+                )
+            }
+
+            // TOP-RIGHT HANDLE
+            Box(
+                modifier = Modifier
+                    .offset(x = playerLeft + playerWidth - 24.dp, y = playerTop - 24.dp)
+                    .size(48.dp)
+                    .pointerInput(canvasWidthPx, canvasHeightPx, screenLayout, ratio) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            val dX = dragAmount.x / canvasWidthPx
+                            val dY = dragAmount.y / canvasHeightPx
+
+                            val fixedLeft = screenLayout.left
+                            val fixedBottom = screenLayout.top + screenLayout.height
+
+                            val updated = checkRatioResizeTopRight(
+                                newRight = screenLayout.left + screenLayout.width + dX,
+                                newTop = screenLayout.top + dY,
+                                fixedLeft = fixedLeft,
+                                fixedBottom = fixedBottom,
+                                canvasWidth = canvasWidthPx,
+                                canvasHeight = canvasHeightPx,
+                                ratio = ratio
+                            )
+                            onLayoutChanged(updated.left, updated.top, updated.width, updated.height)
+                        }
+                    }
+                    .testTag("handle_top_right"),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .background(Color.White, CircleShape)
+                        .border(2.dp, themePreset.primaryColor, CircleShape)
+                )
+            }
+
+            // BOTTOM-LEFT HANDLE
+            Box(
+                modifier = Modifier
+                    .offset(x = playerLeft - 24.dp, y = playerTop + playerHeight - 24.dp)
+                    .size(48.dp)
+                    .pointerInput(canvasWidthPx, canvasHeightPx, screenLayout, ratio) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            val dX = dragAmount.x / canvasWidthPx
+                            val dY = dragAmount.y / canvasHeightPx
+
+                            val fixedRight = screenLayout.left + screenLayout.width
+                            val fixedTop = screenLayout.top
+
+                            val updated = checkRatioResizeBottomLeft(
+                                newLeft = screenLayout.left + dX,
+                                newBottom = screenLayout.top + screenLayout.height + dY,
+                                fixedRight = fixedRight,
+                                fixedTop = fixedTop,
+                                canvasWidth = canvasWidthPx,
+                                canvasHeight = canvasHeightPx,
+                                ratio = ratio
+                            )
+                            onLayoutChanged(updated.left, updated.top, updated.width, updated.height)
+                        }
+                    }
+                    .testTag("handle_bottom_left"),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .background(Color.White, CircleShape)
+                        .border(2.dp, themePreset.primaryColor, CircleShape)
+                )
+            }
+
+            // BOTTOM-RIGHT HANDLE
+            Box(
+                modifier = Modifier
+                    .offset(x = playerLeft + playerWidth - 24.dp, y = playerTop + playerHeight - 24.dp)
+                    .size(48.dp)
+                    .pointerInput(canvasWidthPx, canvasHeightPx, screenLayout, ratio) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            val dX = dragAmount.x / canvasWidthPx
+                            val dY = dragAmount.y / canvasHeightPx
+
+                            val proposedW = screenLayout.width + dX
+                            val proposedH = screenLayout.height + dY
+
+                            val (finalW, finalH) = checkRatioResize(
+                                newW = proposedW,
+                                newH = proposedH,
+                                left = screenLayout.left,
+                                top = screenLayout.top,
+                                canvasWidth = canvasWidthPx,
+                                canvasHeight = canvasHeightPx,
+                                ratio = ratio
+                            )
+                            onLayoutChanged(screenLayout.left, screenLayout.top, finalW, finalH)
+                        }
+                    }
+                    .testTag("handle_bottom_right"),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .background(Color.White, CircleShape)
+                        .border(2.dp, themePreset.primaryColor, CircleShape)
+                )
+            }
+        }
+
+        // 5. Ambient information overlay caption
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -401,6 +654,188 @@ fun CinemaTheaterLayout(
                 )
             )
         }
+    }
+}
+
+private fun checkRatioResize(
+    newW: Float,
+    newH: Float,
+    left: Float,
+    top: Float,
+    canvasWidth: Float,
+    canvasHeight: Float,
+    ratio: Float?
+): Pair<Float, Float> {
+    if (ratio == null) {
+        return Pair(
+            newW.coerceIn(0.10f, 1.0f - left),
+            newH.coerceIn(0.10f, 1.0f - top)
+        )
+    } else {
+        var w = newW.coerceIn(0.10f, 1.0f - left)
+        var h = (w * canvasWidth) / (ratio * canvasHeight)
+
+        if (h > 1.0f - top) {
+            h = 1.0f - top
+            w = (h * canvasHeight * ratio) / canvasWidth
+        }
+        if (h < 0.10f) {
+            h = 0.10f
+            w = (h * canvasHeight * ratio) / canvasWidth
+        }
+        if (w > 1.0f - left) {
+            w = 1.0f - left
+            h = (w * canvasWidth) / (ratio * canvasHeight)
+        }
+        return Pair(w, h)
+    }
+}
+
+private fun checkRatioResizeTopLeft(
+    newLeft: Float,
+    newTop: Float,
+    fixedRight: Float,
+    fixedBottom: Float,
+    canvasWidth: Float,
+    canvasHeight: Float,
+    ratio: Float?
+): ScreenLayoutSettings {
+    if (ratio == null) {
+        val clampLeft = newLeft.coerceIn(0f, fixedRight - 0.10f)
+        val clampTop = newTop.coerceIn(0f, fixedBottom - 0.10f)
+        return ScreenLayoutSettings(
+            left = clampLeft,
+            top = clampTop,
+            width = fixedRight - clampLeft,
+            height = fixedBottom - clampTop,
+            dimAlpha = 0f,
+            subtitleOffset = 0f
+        )
+    } else {
+        val proposedLeft = newLeft.coerceIn(0f, fixedRight - 0.10f)
+        val proposedW = fixedRight - proposedLeft
+        var h = (proposedW * canvasWidth) / (ratio * canvasHeight)
+
+        if (h > fixedBottom) {
+            h = fixedBottom
+        }
+        if (h < 0.10f) {
+            h = 0.10f
+        }
+        var w = (h * canvasHeight * ratio) / canvasWidth
+        if (w > fixedRight) {
+            w = fixedRight
+            h = (w * canvasWidth) / (ratio * canvasHeight)
+        }
+
+        val actualLeft = fixedRight - w
+        val actualTop = fixedBottom - h
+        return ScreenLayoutSettings(
+            left = actualLeft,
+            top = actualTop,
+            width = w,
+            height = h,
+            dimAlpha = 0f,
+            subtitleOffset = 0f
+        )
+    }
+}
+
+private fun checkRatioResizeTopRight(
+    newRight: Float,
+    newTop: Float,
+    fixedLeft: Float,
+    fixedBottom: Float,
+    canvasWidth: Float,
+    canvasHeight: Float,
+    ratio: Float?
+): ScreenLayoutSettings {
+    if (ratio == null) {
+        val clampRight = newRight.coerceIn(fixedLeft + 0.10f, 1.0f)
+        val clampTop = newTop.coerceIn(0f, fixedBottom - 0.10f)
+        return ScreenLayoutSettings(
+            left = fixedLeft,
+            top = clampTop,
+            width = clampRight - fixedLeft,
+            height = fixedBottom - clampTop,
+            dimAlpha = 0f,
+            subtitleOffset = 0f
+        )
+    } else {
+        val proposedRight = newRight.coerceIn(fixedLeft + 0.10f, 1.0f)
+        val proposedW = proposedRight - fixedLeft
+        var h = (proposedW * canvasWidth) / (ratio * canvasHeight)
+
+        if (h > fixedBottom) {
+            h = fixedBottom
+        }
+        if (h < 0.10f) {
+            h = 0.10f
+        }
+        var w = (h * canvasHeight * ratio) / canvasWidth
+        if (w > 1.0f - fixedLeft) {
+            w = 1.0f - fixedLeft
+            h = (w * canvasWidth) / (ratio * canvasHeight)
+        }
+
+        val actualTop = fixedBottom - h
+        return ScreenLayoutSettings(
+            left = fixedLeft,
+            top = actualTop,
+            width = w,
+            height = h,
+            dimAlpha = 0f,
+            subtitleOffset = 0f
+        )
+    }
+}
+
+private fun checkRatioResizeBottomLeft(
+    newLeft: Float,
+    newBottom: Float,
+    fixedRight: Float,
+    fixedTop: Float,
+    canvasWidth: Float,
+    canvasHeight: Float,
+    ratio: Float?
+): ScreenLayoutSettings {
+    if (ratio == null) {
+        val clampLeft = newLeft.coerceIn(0f, fixedRight - 0.10f)
+        val clampBottom = newBottom.coerceIn(fixedTop + 0.10f, 1.0f)
+        return ScreenLayoutSettings(
+            left = clampLeft,
+            top = fixedTop,
+            width = fixedRight - clampLeft,
+            height = clampBottom - fixedTop,
+            dimAlpha = 0f,
+            subtitleOffset = 0f
+        )
+    } else {
+        val proposedLeft = newLeft.coerceIn(0f, fixedRight - 0.10f)
+        val proposedW = fixedRight - proposedLeft
+        var h = (proposedW * canvasWidth) / (ratio * canvasHeight)
+
+        if (h > 1.0f - fixedTop) {
+            h = 1.0f - fixedTop
+        }
+        if (h < 0.10f) {
+            h = 0.10f
+        }
+        var w = (h * canvasHeight * ratio) / canvasWidth
+        if (w > fixedRight) {
+            w = fixedRight
+            h = (w * canvasWidth) / (ratio * canvasHeight)
+        }
+
+        val actualLeft = fixedRight - w
+        return ScreenLayoutSettings(
+            left = actualLeft,
+            top = fixedTop,
+            width = w,
+            height = h,
+            dimAlpha = 0f,
+            subtitleOffset = 0f
+        )
     }
 }
 
@@ -511,6 +946,8 @@ fun InteractiveConsolePanel(
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(0) }
+    val isEditMode by viewModel.isEditMode.collectAsState()
+    val activeAspectRatioId by viewModel.activeAspectRatioId.collectAsState()
 
     Card(
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
@@ -656,6 +1093,174 @@ fun InteractiveConsolePanel(
                                 lineHeight = 13.sp,
                                 modifier = Modifier.padding(top = 4.dp, start = 2.dp)
                             )
+                        }
+
+                        Divider(color = Color.White.copy(alpha = 0.04f))
+
+                        // Section: Screen Customization & Aspect Ratio
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "SCREEN CUSTOMIZATION CONSOLE",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.2.sp,
+                                    color = Color.White.copy(alpha = 0.5f)
+                                )
+                            )
+
+                            // Edit Mode Toggle Switch
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isEditMode) activeThemePreset.primaryColor.copy(alpha = 0.3f) else Color.White.copy(alpha = 0.05f),
+                                        shape = RoundedCornerShape(10.dp)
+                                    ),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isEditMode) activeThemePreset.primaryColor.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.02f)
+                                ),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = null,
+                                            tint = if (isEditMode) activeThemePreset.primaryColor else Color.LightGray,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Column {
+                                            Text(
+                                                text = "Interactive Edit Screen Mode",
+                                                color = Color.White,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Text(
+                                                text = "Drag or resize the video player directly",
+                                                color = TextMuted,
+                                                fontSize = 10.sp
+                                            )
+                                        }
+                                    }
+                                    Switch(
+                                        checked = isEditMode,
+                                        onCheckedChange = { viewModel.setEditMode(it) },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = activeThemePreset.primaryColor,
+                                            uncheckedThumbColor = Color.LightGray,
+                                            uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
+                                        ),
+                                        modifier = Modifier.testTag("edit_mode_switch")
+                                    )
+                                }
+                            }
+
+                            // Aspect Ratio Presets Row
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "ASPECT RATIO PRESET",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.0.sp,
+                                    color = Color.White.copy(alpha = 0.4f),
+                                    fontSize = 9.sp
+                                )
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                val ratioOptions = listOf(
+                                    AspectRatioPreset.FREE,
+                                    AspectRatioPreset.RATIO_16_9,
+                                    AspectRatioPreset.RATIO_21_9,
+                                    AspectRatioPreset.RATIO_4_3,
+                                    AspectRatioPreset.RATIO_1_1
+                                )
+                                ratioOptions.forEach { preset ->
+                                    val isRatioSelected = activeAspectRatioId == preset.id
+                                    Card(
+                                        onClick = { viewModel.selectAspectRatio(preset.id) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(38.dp)
+                                            .border(
+                                                width = if (isRatioSelected) 1.5.dp else 1.dp,
+                                                color = if (isRatioSelected) activeThemePreset.primaryColor else Color.White.copy(alpha = 0.08f),
+                                                shape = RoundedCornerShape(6.dp)
+                                            )
+                                            .testTag("ratio_preset_${preset.id}"),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (isRatioSelected) activeThemePreset.primaryColor.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.02f)
+                                        ),
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = preset.displayName,
+                                                color = if (isRatioSelected) Color.White else Color.LightGray,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = if (isRatioSelected) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Display Real-time Position Variables
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = Color.White.copy(alpha = 0.02f)
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    val selectPresetObj = AspectRatioPreset.getById(activeAspectRatioId)
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("X POS", fontSize = 8.sp, color = TextMuted)
+                                        Text("${(screenLayout.left * 100).toInt()}%", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("Y POS", fontSize = 8.sp, color = TextMuted)
+                                        Text("${(screenLayout.top * 100).toInt()}%", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("WIDTH", fontSize = 8.sp, color = TextMuted)
+                                        Text("${(screenLayout.width * 100).toInt()}%", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("HEIGHT", fontSize = 8.sp, color = TextMuted)
+                                        Text("${(screenLayout.height * 100).toInt()}%", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("PRESET", fontSize = 8.sp, color = TextMuted)
+                                        Text(selectPresetObj.displayName, fontSize = 11.sp, color = activeThemePreset.primaryColor, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
                         }
 
                         Divider(color = Color.White.copy(alpha = 0.04f))
