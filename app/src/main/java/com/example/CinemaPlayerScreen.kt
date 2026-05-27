@@ -337,16 +337,25 @@ fun CinemaTheaterLayout(
     val defaultRatioValue = presetRatio ?: 1.7777778f
 
     // Reactively reset detectedRatio to default when playable source state changes
-    LaunchedEffect(playableUri) {
+    LaunchedEffect(playableUri, activeAspectRatioId) {
         if (playableUri.isNullOrBlank()) {
             detectedRatio = defaultRatioValue
+        } else if (presetRatio != null) {
+            detectedRatio = presetRatio
         }
     }
+
+    var canvasWidthPx by remember { mutableStateOf(1f) }
+    var canvasHeightPx by remember { mutableStateOf(1f) }
 
     BoxWithConstraints(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.Transparent),
+            .background(Color.Transparent)
+            .onGloballyPositioned { coordinates ->
+                canvasWidthPx = coordinates.size.width.toFloat().coerceAtLeast(1f)
+                canvasHeightPx = coordinates.size.height.toFloat().coerceAtLeast(1f)
+            },
         contentAlignment = Alignment.Center
     ) {
         val containerWidthVal = maxWidth.value
@@ -360,7 +369,7 @@ fun CinemaTheaterLayout(
                 .background(Color.Black.copy(alpha = screenLayout.dimAlpha))
         )
 
-        // 3. Compute the centered player dimensions based on target area fraction (~0.65)
+        // 3. Compute the adaptive player dimensions based on target area fraction (~0.65)
         val targetAreaFraction = 0.65f
         val aspectR = detectedRatio.coerceIn(0.3f, 3.5f) // sensible min/max bounds
 
@@ -387,12 +396,64 @@ fun CinemaTheaterLayout(
 
         val playerWidth = calculatedWidth.dp
         val playerHeight = calculatedHeight.dp
-        val playerLeft = ((containerWidthVal - calculatedWidth) / 2f).dp
-        val playerTop = ((containerHeightVal - calculatedHeight) / 2f).dp
+
+        // Check if layout is customized. If coordinates match the theme default, we treat it as centered.
+        val isCustomized = (screenLayout.left != themePreset.defaultLeft || screenLayout.top != themePreset.defaultTop)
+
+        val activeLeftFraction = if (isCustomized) {
+            screenLayout.left
+        } else {
+            val defaultLeft = (containerWidthVal - calculatedWidth) / 2f
+            (defaultLeft / containerWidthVal).coerceIn(0f, 1f)
+        }
+
+        val activeTopFraction = if (isCustomized) {
+            screenLayout.top
+        } else {
+            val defaultTop = (containerHeightVal - calculatedHeight) / 2f
+            (defaultTop / containerHeightVal).coerceIn(0f, 1f)
+        }
+
+        val playerLeft = (activeLeftFraction * containerWidthVal).dp
+        val playerTop = (activeTopFraction * containerHeightVal).dp
 
         val cornerShape = RoundedCornerShape(themePreset.cornerRadiusDp.dp)
 
-        // 4. Centered Player container frame matching chosen theme visual assets
+        // 4. Draggable drag modification (smooth relative tracking and bounds clamping)
+        val dragModifier = if (isEditMode) {
+            Modifier.pointerInput(containerWidthVal, containerHeightVal, calculatedWidth, calculatedHeight, activeLeftFraction, activeTopFraction) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    val canvasW = canvasWidthPx
+                    val canvasH = canvasHeightPx
+                    if (canvasW > 10f && canvasH > 10f) {
+                        val dLeft = dragAmount.x / canvasW
+                        val dTop = dragAmount.y / canvasH
+
+                        val newLeftFrac = activeLeftFraction + dLeft
+                        val newTopFrac = activeTopFraction + dTop
+
+                        // Clamping fraction so the entire player stays completely inside screen area bounds
+                        val maxLeftFrac = ((containerWidthVal - calculatedWidth) / containerWidthVal).coerceAtLeast(0f)
+                        val maxTopFrac = ((containerHeightVal - calculatedHeight) / containerHeightVal).coerceAtLeast(0f)
+
+                        val clampedLeftFrac = newLeftFrac.coerceIn(0f, maxLeftFrac)
+                        val clampedTopFrac = newTopFrac.coerceIn(0f, maxTopFrac)
+
+                        onLayoutChanged(
+                            clampedLeftFrac,
+                            clampedTopFrac,
+                            screenLayout.width,
+                            screenLayout.height
+                        )
+                    }
+                }
+            }
+        } else {
+            Modifier
+        }
+
+        // 5. Centered/Positioned Player container frame matching chosen theme visual assets
         Box(
             modifier = Modifier
                 .offset(x = playerLeft, y = playerTop)
@@ -489,7 +550,8 @@ fun CinemaTheaterLayout(
                             )
                         }
                     }
-                },
+                }
+                .then(dragModifier),
             contentAlignment = Alignment.Center
         ) {
             Box(
@@ -563,7 +625,7 @@ fun CinemaTheaterLayout(
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "ADAPTIVE ASPECT ACTIVE",
+                                text = "DRAG TO POSITION",
                                 color = Color.White,
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Bold,
