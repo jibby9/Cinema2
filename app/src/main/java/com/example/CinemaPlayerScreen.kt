@@ -364,7 +364,7 @@ fun CinemaTheaterLayout(
         val containerHeight = maxHeight
 
         // 1. Render the real-time drawn backdrop environment matching chosen theme
-        ThemeBackdrop(themeId = themePreset.id, modifier = Modifier.fillMaxSize())
+        ThemeBackdrop(themePreset = themePreset, isEditMode = isEditMode, modifier = Modifier.fillMaxSize())
 
         // 2. Render localized backdrop dim overlay based on settings
         Box(
@@ -395,92 +395,190 @@ fun CinemaTheaterLayout(
             Modifier
         }
 
+        val cornerShape = RoundedCornerShape(themePreset.cornerRadiusDp.dp)
+
         Box(
             modifier = Modifier
                 .offset(x = playerLeft, y = playerTop)
                 .size(width = playerWidth, height = playerHeight)
                 .testTag("video_screen_container")
-                .clip(RoundedCornerShape(6.dp))
-                .border(
-                    width = if (isEditMode) 2.5.dp else 2.dp,
-                    color = if (isEditMode) themePreset.primaryColor else CinemaBevelCharcoal,
-                    shape = RoundedCornerShape(6.dp)
-                )
-                .then(moveModifier)
                 .drawBehind {
-                    // Soft neon corner glow
-                    drawRect(
-                        color = themePreset.primaryColor.copy(alpha = 0.15f),
-                        topLeft = androidx.compose.ui.geometry.Offset(-6f, -6f),
-                        size = androidx.compose.ui.geometry.Size(size.width + 12f, size.height + 12f)
-                    )
-                }
-                .background(Color.Black),
-            contentAlignment = Alignment.Center
-        ) {
-            if (!playableUri.isNullOrBlank()) {
-                VideoPlayerView(
-                    videoUrl = playableUri,
-                    onPlaybackError = onPlaybackError,
-                    modifier = Modifier.fillMaxSize(),
-                    headers = headers
-                )
-
-                // Close/Stop Overlay Button in corner (Hidden during edit mode)
-                if (!isEditMode) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(8.dp),
-                        contentAlignment = Alignment.TopEnd
-                    ) {
-                        IconButton(
-                            onClick = onClearPlaySource,
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = Color.Black.copy(alpha = 0.65f)
-                            ),
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Stop streams",
-                                tint = Color.White,
-                                modifier = Modifier.size(15.dp)
+                    val glowRadius = themePreset.glowRadiusDp.dp.toPx()
+                    val glowCol = themePreset.glowColor
+                    val shadowFactor = themePreset.shadowIntensity
+                    
+                    // 1. Draw premium ambient drop-glow / bloom behind the screen
+                    if (glowRadius > 0f) {
+                        val passes = 6
+                        for (i in 1..passes) {
+                            val scale = 1.0f + (i * 0.03f * (glowRadius / 20f))
+                            val alphaFactor = (passes - i + 1).toFloat() / passes
+                            drawRoundRect(
+                                color = glowCol.copy(alpha = glowCol.alpha * alphaFactor * shadowFactor),
+                                topLeft = androidx.compose.ui.geometry.Offset(
+                                    -(size.width * (scale - 1f) / 2f),
+                                    -(size.height * (scale - 1f) / 2f)
+                                ),
+                                size = androidx.compose.ui.geometry.Size(
+                                    size.width * scale,
+                                    size.height * scale
+                                ),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                                    themePreset.cornerRadiusDp.dp.toPx() * scale,
+                                    themePreset.cornerRadiusDp.dp.toPx() * scale
+                                )
                             )
                         }
                     }
                 }
-            } else {
-                TheaterFallbackCurtain(
-                    errorMessage = errorMessage,
-                    onPlayTestVideo = onPlayTestVideo,
-                    primaryColor = themePreset.primaryColor
+                .clip(cornerShape)
+                .background(themePreset.frameColor)
+                .then(
+                    if (isEditMode) {
+                        Modifier.border(
+                            width = 2.5.dp,
+                            color = themePreset.primaryColor,
+                            shape = cornerShape
+                        )
+                    } else {
+                        Modifier.border(
+                            width = 1.dp,
+                            color = Color.White.copy(alpha = 0.12f),
+                            shape = cornerShape
+                        )
+                    }
                 )
-            }
-
-            if (isEditMode) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(themePreset.primaryColor.copy(alpha = 0.2f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.OpenWith,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "DRAG TO RE-POSITION",
-                            color = Color.White,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.2.sp
+                // Draw elegant theme-specific wood grain or neon markings
+                .drawBehind {
+                    val width = size.width
+                    val height = size.height
+                    
+                    when (themePreset.id.lowercase()) {
+                        "cosy_cabin" -> {
+                            // Draw warm woody timber grains behind the screen padding area
+                            val grainColor = Color(0xFF5C2D16).copy(alpha = 0.35f)
+                            for (i in listOf(4f, 8f, 12f)) {
+                                drawRoundRect(
+                                    color = grainColor,
+                                    topLeft = androidx.compose.ui.geometry.Offset(i, i),
+                                    size = androidx.compose.ui.geometry.Size(width - (i * 2), height - (i * 2)),
+                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                                        themePreset.cornerRadiusDp.dp.toPx() - i,
+                                        themePreset.cornerRadiusDp.dp.toPx() - i
+                                    ),
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5f)
+                                )
+                            }
+                        }
+                        "sports_arena" -> {
+                            // Jumbotron cyber neon frame outline
+                            val neonLineColor = Color(0xFF10B981).copy(alpha = 0.35f)
+                            drawRoundRect(
+                                color = neonLineColor,
+                                topLeft = androidx.compose.ui.geometry.Offset(3f, 3f),
+                                size = androidx.compose.ui.geometry.Size(width - 6f, height - 6f),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                                    themePreset.cornerRadiusDp.dp.toPx() - 3f,
+                                    themePreset.cornerRadiusDp.dp.toPx() - 3f
+                                ),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5f)
                             )
-                        )
+                        }
+                        "cinema" -> {
+                            // Linear bevel overlay
+                            drawRect(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.White.copy(alpha = 0.04f),
+                                        Color.Transparent,
+                                        Color.Black.copy(alpha = 0.35f)
+                                    )
+                                )
+                            )
+                        }
+                    }
+                }
+                .then(moveModifier),
+            contentAlignment = Alignment.Center
+        ) {
+            // Inner video viewport framed by padding matching theme thickness
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(themePreset.frameThicknessDp.dp)
+                    .clip(RoundedCornerShape((themePreset.cornerRadiusDp - 3).coerceAtLeast(2).dp))
+                    .background(Color.Black)
+                    .border(
+                        width = 1.dp,
+                        color = Color.White.copy(alpha = 0.08f),
+                        shape = RoundedCornerShape((themePreset.cornerRadiusDp - 3).coerceAtLeast(2).dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!playableUri.isNullOrBlank()) {
+                    VideoPlayerView(
+                        videoUrl = playableUri,
+                        onPlaybackError = onPlaybackError,
+                        modifier = Modifier.fillMaxSize(),
+                        headers = headers
+                    )
+
+                    // Close/Stop Overlay Button in corner (Hidden during edit mode)
+                    if (!isEditMode) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(8.dp),
+                            contentAlignment = Alignment.TopEnd
+                        ) {
+                            IconButton(
+                                onClick = onClearPlaySource,
+                                colors = IconButtonDefaults.iconButtonColors(
+                                    containerColor = Color.Black.copy(alpha = 0.65f)
+                                ),
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Stop streams",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    TheaterFallbackCurtain(
+                        errorMessage = errorMessage,
+                        onPlayTestVideo = onPlayTestVideo,
+                        primaryColor = themePreset.primaryColor
+                    )
+                }
+
+                if (isEditMode) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(themePreset.primaryColor.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.OpenWith,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "DRAG TO RE-POSITION",
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.2.sp
+                                )
+                            )
+                        }
                     }
                 }
             }

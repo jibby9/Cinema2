@@ -16,9 +16,11 @@ import androidx.compose.ui.graphics.Path
 
 @Composable
 fun ThemeBackdrop(
-    themeId: String,
+    themePreset: ThemePreset,
+    isEditMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val themeId = themePreset.id
     val infiniteTransition = rememberInfiniteTransition(label = "ambient_effects")
     
     // Projector flicker for cinema or fire heat glow for cabin
@@ -42,6 +44,9 @@ fun ThemeBackdrop(
         label = "projector_pulse"
     )
 
+    // Decorative opacity is scaled down in Edit Mode to help placement accuracy
+    val decorMultiplier = if (isEditMode) 0.25f else 1.0f
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -53,7 +58,7 @@ fun ThemeBackdrop(
                     val width = size.width
                     val height = size.height
 
-                    // 1. Warm wooden panelling background gradient
+                    // 1. Warm wooden panelling background gradient (slightly subdued in edit mode)
                     drawRect(
                         brush = Brush.linearGradient(
                             colors = listOf(
@@ -63,7 +68,8 @@ fun ThemeBackdrop(
                             ),
                             start = Offset(0f, 0f),
                             end = Offset(width, height)
-                        )
+                        ),
+                        alpha = if (isEditMode) 0.5f else 1.0f
                     )
 
                     // 2. Cabin wood logs / planks grid simulation
@@ -72,14 +78,14 @@ fun ThemeBackdrop(
                     for (i in 1 until totalPlanks) {
                         val y = i * plankHeight
                         drawLine(
-                            color = Color(0xFF0D0300).copy(alpha = 0.8f),
+                            color = Color(0xFF0D0300).copy(alpha = 0.8f * decorMultiplier),
                             start = Offset(0f, y),
                             end = Offset(width, y),
                             strokeWidth = 3f
                         )
                         // Bevel highlights
                         drawLine(
-                            color = Color(0xFF421C0B).copy(alpha = 0.4f),
+                            color = Color(0xFF421C0B).copy(alpha = 0.4f * decorMultiplier),
                             start = Offset(0f, y + 2f),
                             end = Offset(width, y + 2f),
                             strokeWidth = 1f
@@ -89,13 +95,13 @@ fun ThemeBackdrop(
                     // Log notches vertical dividers
                     for (x in listOf(width * 0.15f, width * 0.85f)) {
                         drawLine(
-                            color = Color(0xFF0D0300).copy(alpha = 0.9f),
+                            color = Color(0xFF0D0300).copy(alpha = 0.9f * decorMultiplier),
                             start = Offset(x, 0f),
                             end = Offset(x, height),
                             strokeWidth = 6f
                         )
                         drawLine(
-                            color = Color(0xFF5C2D16).copy(alpha = 0.3f),
+                            color = Color(0xFF5C2D16).copy(alpha = 0.3f * decorMultiplier),
                             start = Offset(x + 4f, 0f),
                             end = Offset(x + 4f, height),
                             strokeWidth = 2f
@@ -106,8 +112,8 @@ fun ThemeBackdrop(
                     val hearthCenter = Offset(width * 0.5f, height)
                     val fireplaceGlow = Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFFEA580C).copy(alpha = 0.55f * glowPulse), // Vibrant Orange
-                            Color(0xFF7C2D12).copy(alpha = 0.25f),             // Burnt Umber
+                            Color(0xFFEA580C).copy(alpha = 0.55f * glowPulse * decorMultiplier), // Vibrant Orange
+                            Color(0xFF7C2D12).copy(alpha = 0.25f * decorMultiplier),             // Burnt Umber
                             Color.Transparent
                         ),
                         center = hearthCenter,
@@ -117,12 +123,12 @@ fun ThemeBackdrop(
 
                     // Warm corner highlights
                     drawCircle(
-                        color = Color(0xFFF97316).copy(alpha = 0.12f * glowPulse),
+                        color = Color(0xFFF97316).copy(alpha = 0.12f * glowPulse * decorMultiplier),
                         center = Offset(0f, height),
                         radius = width * 0.3f
                     )
                     drawCircle(
-                        color = Color(0xFFF97316).copy(alpha = 0.12f * glowPulse),
+                        color = Color(0xFFF97316).copy(alpha = 0.12f * glowPulse * decorMultiplier),
                         center = Offset(width, height),
                         radius = width * 0.3f
                     )
@@ -134,7 +140,7 @@ fun ThemeBackdrop(
                     val width = size.width
                     val height = size.height
 
-                    // 1. Deep stadium field background (Emerald night)
+                    // 1. Deep stadium field background (Emerald night) (slightly subdued in edit mode)
                     drawRect(
                         brush = Brush.verticalGradient(
                             colors = listOf(
@@ -142,7 +148,8 @@ fun ThemeBackdrop(
                                 Color(0xFF064E3B), // Soft sports field green
                                 Color(0xFF042F22)  // Low shadow grass
                             )
-                        )
+                        ),
+                        alpha = if (isEditMode) 0.5f else 1.0f
                     )
 
                     // 2. Linear turf details (mowed grass lines)
@@ -151,7 +158,7 @@ fun ThemeBackdrop(
                     for (i in 0 until stripCount) {
                         if (i % 2 == 0) {
                             drawRect(
-                                color = Color.White.copy(alpha = 0.02f),
+                                color = Color.White.copy(alpha = 0.02f * decorMultiplier),
                                 topLeft = Offset(i * stripWidth, 0f),
                                 size = Size(stripWidth, height)
                             )
@@ -161,14 +168,14 @@ fun ThemeBackdrop(
                     // Soccer / stadium chalk lines
                     // Midfield circle
                     drawCircle(
-                        color = Color.White.copy(alpha = 0.05f),
+                        color = Color.White.copy(alpha = 0.05f * decorMultiplier),
                         center = Offset(width / 2f, height),
                         radius = width * 0.22f,
                         style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f)
                     )
                     // Touchline bottom
                     drawLine(
-                        color = Color.White.copy(alpha = 0.08f),
+                        color = Color.White.copy(alpha = 0.08f * decorMultiplier),
                         start = Offset(0f, height - 10f),
                         end = Offset(width, height - 10f),
                         strokeWidth = 4f
@@ -185,8 +192,8 @@ fun ThemeBackdrop(
                         path = leftSpotlight,
                         brush = Brush.linearGradient(
                             colors = listOf(
-                                Color(0xFFE0F2FE).copy(alpha = 0.40f), // Ice Blue Floodlight
-                                Color(0xFF10B981).copy(alpha = 0.05f), // Stadium glow blend
+                                Color(0xFFE0F2FE).copy(alpha = 0.40f * decorMultiplier), // Ice Blue Floodlight
+                                Color(0xFF10B981).copy(alpha = 0.05f * decorMultiplier), // Stadium glow blend
                                 Color.Transparent
                             ),
                             start = Offset(0f, 0f),
@@ -204,8 +211,8 @@ fun ThemeBackdrop(
                         path = rightSpotlight,
                         brush = Brush.linearGradient(
                             colors = listOf(
-                                Color(0xFFE0F2FE).copy(alpha = 0.40f),
-                                Color(0xFF10B981).copy(alpha = 0.05f),
+                                Color(0xFFE0F2FE).copy(alpha = 0.40f * decorMultiplier),
+                                Color(0xFF10B981).copy(alpha = 0.05f * decorMultiplier),
                                 Color.Transparent
                             ),
                             start = Offset(width, 0f),
@@ -215,26 +222,26 @@ fun ThemeBackdrop(
 
                     // Little bright flares in upper corners representing stadium matrix lights
                     drawCircle(
-                        color = Color(0xFFF8FAFC),
+                        color = Color(0xFFF8FAFC).copy(alpha = decorMultiplier),
                         center = Offset(15f, 15f),
                         radius = 12f
                     )
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color.White, Color.Transparent),
+                            colors = listOf(Color.White.copy(alpha = decorMultiplier), Color.Transparent),
                             center = Offset(15f, 15f),
                             radius = 60f
                         )
                     )
 
                     drawCircle(
-                        color = Color(0xFFF8FAFC),
+                        color = Color(0xFFF8FAFC).copy(alpha = decorMultiplier),
                         center = Offset(width - 15f, 15f),
                         radius = 12f
                     )
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color.White, Color.Transparent),
+                            colors = listOf(Color.White.copy(alpha = decorMultiplier), Color.Transparent),
                             center = Offset(width - 15f, 15f),
                             radius = 60f
                         )
@@ -271,8 +278,8 @@ fun ThemeBackdrop(
                         path = projectorBeam,
                         brush = Brush.verticalGradient(
                             colors = listOf(
-                                Color(0xFF818CF8).copy(alpha = 0.22f * projectorPulse), // Indigo projector bulbs
-                                Color(0xFF4F46E5).copy(alpha = 0.06f * projectorPulse), // Light violet scatter
+                                Color(0xFF818CF8).copy(alpha = 0.22f * projectorPulse * decorMultiplier), // Indigo projector bulbs
+                                Color(0xFF4F46E5).copy(alpha = 0.06f * projectorPulse * decorMultiplier), // Light violet scatter
                                 Color.Transparent
                             ),
                             startY = 0f,
@@ -283,7 +290,7 @@ fun ThemeBackdrop(
                     // 3. Render seat rows outlines silhouette at the bottom (opacity 25%)
                     val rowY = height * 0.92f
                     drawLine(
-                        color = Color(0xFF312E81).copy(alpha = 0.20f),
+                        color = Color(0xFF312E81).copy(alpha = 0.20f * decorMultiplier),
                         start = Offset(0f, rowY),
                         end = Offset(width, rowY),
                         strokeWidth = 24f
@@ -294,7 +301,7 @@ fun ThemeBackdrop(
                     var currentX = chairSpacing
                     while (currentX < width) {
                         drawRoundRect(
-                            color = Color(0xFF1E1B4B).copy(alpha = 0.35f),
+                            color = Color(0xFF1E1B4B).copy(alpha = 0.35f * decorMultiplier),
                             topLeft = Offset(currentX, rowY - 12f),
                             size = Size(chairWidth, 20f),
                             cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
@@ -302,6 +309,39 @@ fun ThemeBackdrop(
                         currentX += chairWidth + chairSpacing
                     }
                 }
+            }
+        }
+
+        // 4. Overlap Ambient Theme Color Tint Layer
+        val finalTint = themePreset.ambientColorTint.copy(
+            alpha = themePreset.ambientColorTint.alpha * if (isEditMode) 0.3f else 1.0f
+        )
+        if (finalTint != Color.Transparent) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(finalTint)
+            )
+        }
+
+        // 5. Draw gorgeous Premium Cinematic Vignette Overlay
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val width = size.width
+            val height = size.height
+            val strength = themePreset.vignetteStrength * if (isEditMode) 0.4f else 1.0f
+
+            if (strength > 0f) {
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colorStops = arrayOf(
+                            0.0f to Color.Transparent,
+                            0.5f to Color.Black.copy(alpha = strength * 0.3f),
+                            1.0f to Color.Black.copy(alpha = strength)
+                        ),
+                        center = Offset(width / 2f, height / 2f),
+                        radius = java.lang.Math.hypot(width.toDouble(), height.toDouble()).toFloat() * 0.65f
+                    )
+                )
             }
         }
     }

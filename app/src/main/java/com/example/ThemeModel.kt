@@ -16,7 +16,18 @@ data class ThemePreset(
     val defaultDimAlpha: Float,
     val defaultSubtitleOffset: Float, // safe-area offset percentage
     val primaryColor: Color,
-    val secondaryColor: Color
+    val secondaryColor: Color,
+    // Premium theme-specific visual polish properties
+    val cornerRadiusDp: Int = 8,
+    val frameThicknessDp: Int = 4,
+    val frameColor: Color = Color(0xFF0F172A),
+    val glowColor: Color = Color(0x406366F1),
+    val glowRadiusDp: Int = 16,
+    val shadowIntensity: Float = 0.5f,
+    val vignetteStrength: Float = 0.4f,
+    val ambientColorTint: Color = Color.Transparent,
+    val backdropImageResId: Int? = null,
+    val foregroundImageResId: Int? = null
 )
 
 /**
@@ -46,7 +57,15 @@ object ThemePresets {
         defaultDimAlpha = 0.80f,
         defaultSubtitleOffset = 0.05f,
         primaryColor = Color(0xFF6366F1), // Indigo
-        secondaryColor = Color(0xFF1E1B4B) // Dark Indigo
+        secondaryColor = Color(0xFF1E1B4B), // Dark Indigo
+        cornerRadiusDp = 8,
+        frameThicknessDp = 6,
+        frameColor = Color(0xFF0C0A09), // Matte black
+        glowColor = Color(0x736366F1), // Soft blue glow
+        glowRadiusDp = 24,
+        shadowIntensity = 0.8f,
+        vignetteStrength = 0.7f,
+        ambientColorTint = Color(0x1A4F46E5) // Soft Indigo projector tint
     )
 
     val CosyCabin = ThemePreset(
@@ -60,7 +79,15 @@ object ThemePresets {
         defaultDimAlpha = 0.50f,
         defaultSubtitleOffset = 0.08f,
         primaryColor = Color(0xFFF97316), // Warm Orange
-        secondaryColor = Color(0xFF451A03) // Deep Brown
+        secondaryColor = Color(0xFF451A03), // Deep Brown
+        cornerRadiusDp = 16,
+        frameThicknessDp = 10,
+        frameColor = Color(0xFF451A03), // Warm wooden timber frame
+        glowColor = Color(0x60F97316), // Soft warm amber fire glow
+        glowRadiusDp = 30,
+        shadowIntensity = 0.6f,
+        vignetteStrength = 0.5f,
+        ambientColorTint = Color(0x1F7C2D12) // Warm brown amber tint
     )
 
     val SportsArena = ThemePreset(
@@ -74,7 +101,15 @@ object ThemePresets {
         defaultDimAlpha = 0.35f,
         defaultSubtitleOffset = 0.03f,
         primaryColor = Color(0xFF10B981), // Emerald Green
-        secondaryColor = Color(0xFF064E3B) // Dark Stadium Green
+        secondaryColor = Color(0xFF064E3B), // Dark Stadium Green
+        cornerRadiusDp = 4,
+        frameThicknessDp = 8,
+        frameColor = Color(0xFF1E293B), // Sleek metal frame
+        glowColor = Color(0x6010B981), // Emerald floodlight glow
+        glowRadiusDp = 18,
+        shadowIntensity = 0.4f,
+        vignetteStrength = 0.3f,
+        ambientColorTint = Color(0x1534D399) // Cool green stadium tint
     )
 
     val all = listOf(Cinema, CosyCabin, SportsArena)
