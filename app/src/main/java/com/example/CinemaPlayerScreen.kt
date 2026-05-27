@@ -25,6 +25,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -369,8 +371,8 @@ fun CinemaTheaterLayout(
                 .background(Color.Black.copy(alpha = screenLayout.dimAlpha))
         )
 
-        // 3. Compute the adaptive player dimensions based on target area fraction (~0.65)
-        val targetAreaFraction = 0.65f
+        // 3. Compute the adaptive player dimensions based on target area fraction (~0.80)
+        val targetAreaFraction = 0.80f
         val aspectR = detectedRatio.coerceIn(0.3f, 3.5f) // sensible min/max bounds
 
         val targetArea = targetAreaFraction * containerAreaVal
@@ -400,54 +402,70 @@ fun CinemaTheaterLayout(
         // Check if layout is customized. If coordinates match the theme default, we treat it as centered.
         val isCustomized = (screenLayout.left != themePreset.defaultLeft || screenLayout.top != themePreset.defaultTop)
 
-        val activeLeftFraction = if (isCustomized) {
-            screenLayout.left
-        } else {
-            val defaultLeft = (containerWidthVal - calculatedWidth) / 2f
-            (defaultLeft / containerWidthVal).coerceIn(0f, 1f)
-        }
+        val maxLeftFrac = ((containerWidthVal - calculatedWidth) / containerWidthVal).coerceAtLeast(0f)
+        val maxTopFrac = ((containerHeightVal - calculatedHeight) / containerHeightVal).coerceAtLeast(0f)
 
-        val activeTopFraction = if (isCustomized) {
-            screenLayout.top
-        } else {
-            val defaultTop = (containerHeightVal - calculatedHeight) / 2f
-            (defaultTop / containerHeightVal).coerceIn(0f, 1f)
-        }
+        // Lightweight dragging offset tracking separates high-frequency offset writes from persistent storage saves
+        var isDragging by remember { mutableStateOf(false) }
+        var activeLeftFraction by remember { mutableStateOf(0f) }
+        var activeTopFraction by remember { mutableStateOf(0f) }
 
-        val playerLeft = (activeLeftFraction * containerWidthVal).dp
-        val playerTop = (activeTopFraction * containerHeightVal).dp
+        // Proactively synchronize local dragging states when view layout modifications or screen dimensions update
+        LaunchedEffect(screenLayout.left, screenLayout.top, containerWidthVal, containerHeightVal, calculatedWidth, calculatedHeight, isDragging) {
+            if (!isDragging) {
+                activeLeftFraction = if (isCustomized) {
+                    screenLayout.left.coerceIn(0f, maxLeftFrac)
+                } else {
+                    val defaultLeft = (containerWidthVal - calculatedWidth) / 2f
+                    (defaultLeft / containerWidthVal).coerceIn(0f, maxLeftFrac)
+                }
+
+                activeTopFraction = if (isCustomized) {
+                    screenLayout.top.coerceIn(0f, maxTopFrac)
+                } else {
+                    val defaultTop = (containerHeightVal - calculatedHeight) / 2f
+                    (defaultTop / containerHeightVal).coerceIn(0f, maxTopFrac)
+                }
+            }
+        }
 
         val cornerShape = RoundedCornerShape(themePreset.cornerRadiusDp.dp)
 
         // 4. Draggable drag modification (smooth relative tracking and bounds clamping)
         val dragModifier = if (isEditMode) {
-            Modifier.pointerInput(containerWidthVal, containerHeightVal, calculatedWidth, calculatedHeight, activeLeftFraction, activeTopFraction) {
-                detectDragGestures { change, dragAmount ->
-                    change.consume()
-                    val canvasW = canvasWidthPx
-                    val canvasH = canvasHeightPx
-                    if (canvasW > 10f && canvasH > 10f) {
-                        val dLeft = dragAmount.x / canvasW
-                        val dTop = dragAmount.y / canvasH
-
-                        val newLeftFrac = activeLeftFraction + dLeft
-                        val newTopFrac = activeTopFraction + dTop
-
-                        // Clamping fraction so the entire player stays completely inside screen area bounds
-                        val maxLeftFrac = ((containerWidthVal - calculatedWidth) / containerWidthVal).coerceAtLeast(0f)
-                        val maxTopFrac = ((containerHeightVal - calculatedHeight) / containerHeightVal).coerceAtLeast(0f)
-
-                        val clampedLeftFrac = newLeftFrac.coerceIn(0f, maxLeftFrac)
-                        val clampedTopFrac = newTopFrac.coerceIn(0f, maxTopFrac)
-
+            Modifier.pointerInput(containerWidthVal, containerHeightVal, calculatedWidth, calculatedHeight) {
+                detectDragGestures(
+                    onDragStart = {
+                        isDragging = true
+                    },
+                    onDragEnd = {
+                        isDragging = false
                         onLayoutChanged(
-                            clampedLeftFrac,
-                            clampedTopFrac,
+                            activeLeftFraction,
+                            activeTopFraction,
                             screenLayout.width,
                             screenLayout.height
                         )
+                    },
+                    onDragCancel = {
+                        isDragging = false
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        val canvasW = canvasWidthPx
+                        val canvasH = canvasHeightPx
+                        if (canvasW > 10f && canvasH > 10f) {
+                            val dLeft = dragAmount.x / canvasW
+                            val dTop = dragAmount.y / canvasH
+
+                            val newLeftFrac = activeLeftFraction + dLeft
+                            val newTopFrac = activeTopFraction + dTop
+
+                            activeLeftFraction = newLeftFrac.coerceIn(0f, maxLeftFrac)
+                            activeTopFraction = newTopFrac.coerceIn(0f, maxTopFrac)
+                        }
                     }
-                }
+                )
             }
         } else {
             Modifier
@@ -456,7 +474,12 @@ fun CinemaTheaterLayout(
         // 5. Centered/Positioned Player container frame matching chosen theme visual assets
         Box(
             modifier = Modifier
-                .offset(x = playerLeft, y = playerTop)
+                .offset {
+                    IntOffset(
+                        x = (activeLeftFraction * canvasWidthPx).roundToInt(),
+                        y = (activeTopFraction * canvasHeightPx).roundToInt()
+                    )
+                }
                 .size(width = playerWidth, height = playerHeight)
                 .testTag("video_screen_container")
                 .drawBehind {
@@ -545,7 +568,7 @@ fun CinemaTheaterLayout(
                                         Color.White.copy(alpha = 0.04f),
                                         Color.Transparent,
                                         Color.Black.copy(alpha = 0.35f)
-                                    )
+                                     )
                                 )
                             )
                         }
