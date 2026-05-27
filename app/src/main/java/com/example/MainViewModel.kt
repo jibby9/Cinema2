@@ -4,11 +4,15 @@ import android.app.Application
 import android.content.Intent
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val preferenceManager = PlayerPreferenceManager(application)
 
     private val _parsedIntent = MutableStateFlow<ParsedIntentInfo?>(null)
     val parsedIntent: StateFlow<ParsedIntentInfo?> = _parsedIntent.asStateFlow()
@@ -25,6 +29,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _showDebugPanel = MutableStateFlow(true)
     val showDebugPanel: StateFlow<Boolean> = _showDebugPanel.asStateFlow()
 
+    // Themes states
+    private val _activeThemeId = MutableStateFlow("cinema")
+    val activeThemeId: StateFlow<String> = _activeThemeId.asStateFlow()
+
+    private val _activeThemePreset = MutableStateFlow(ThemePresets.Cinema)
+    val activeThemePreset: StateFlow<ThemePreset> = _activeThemePreset.asStateFlow()
+
+    private val _screenLayout = MutableStateFlow(
+        ScreenLayoutSettings(
+            ThemePresets.Cinema.defaultLeft,
+            ThemePresets.Cinema.defaultTop,
+            ThemePresets.Cinema.defaultWidth,
+            ThemePresets.Cinema.defaultHeight,
+            ThemePresets.Cinema.defaultDimAlpha,
+            ThemePresets.Cinema.defaultSubtitleOffset
+        )
+    )
+    val screenLayout: StateFlow<ScreenLayoutSettings> = _screenLayout.asStateFlow()
+
     // Default video stream URL for test playback
     val defaultTestVideoUrl = "https://sandbox-videos.web.cern.ch/record/2241796"
 
@@ -33,6 +56,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Fallback Sample 2 (Sintel): "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4"
 
     private val TAG = "MainViewModel"
+
+    init {
+        // Collect active theme selection and reactive layout configurations
+        viewModelScope.launch {
+            preferenceManager.selectedThemeId.collect { id ->
+                _activeThemeId.value = id
+                _activeThemePreset.value = ThemePresets.getById(id)
+            }
+        }
+
+        viewModelScope.launch {
+            // Keep screen layout settings in sync with whichever theme is currently chosen
+            _activeThemeId.collect { id ->
+                preferenceManager.getLayoutSettings(id).collect { settings ->
+                    _screenLayout.value = settings
+                }
+            }
+        }
+    }
+
+    fun selectTheme(themeId: String) {
+        viewModelScope.launch {
+            Log.d(TAG, "Selecting theme: $themeId")
+            preferenceManager.saveSelectedTheme(themeId)
+        }
+    }
+
+    fun updateScreenLayout(left: Float, top: Float, width: Float, height: Float, dimAlpha: Float) {
+        viewModelScope.launch {
+            val currentPreset = _activeThemePreset.value
+            val settings = ScreenLayoutSettings(
+                left = left,
+                top = top,
+                width = width,
+                height = height,
+                dimAlpha = dimAlpha,
+                subtitleOffset = currentPreset.defaultSubtitleOffset
+            )
+            _screenLayout.value = settings
+            preferenceManager.saveLayoutSettings(_activeThemeId.value, settings)
+        }
+    }
+
+    fun resetActiveThemeLayout() {
+        viewModelScope.launch {
+            val id = _activeThemeId.value
+            Log.d(TAG, "Resetting layout for theme $id")
+            preferenceManager.resetThemeToDefault(id)
+        }
+    }
+
+    fun resetAllToAppDefaults() {
+        viewModelScope.launch {
+            Log.d(TAG, "Resetting all settings to app defaults")
+            preferenceManager.resetAllSettings()
+        }
+    }
 
     fun handleIntent(intent: Intent?) {
         if (intent == null) return

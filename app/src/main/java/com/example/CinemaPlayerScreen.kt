@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,9 +37,9 @@ import androidx.compose.ui.unit.sp
 private val IndigoPrimary = Color(0xFF6366F1)       // Vibrant Indigo Accent
 private val IndigoSecondary = Color(0xFF4F46E5)     // Deep Indigo Accent
 private val IndigoBadgeText = Color(0xFFA5B4FC)     // Light violet/indigo
-private val AubergineDarkBg = Color(0xFF0D0B0F)     // Core app dark canvas
+private val AubergineDarkBg = Color(0xFF0C0A0F)     // Core app dark canvas
 private val ObsidianSurface = Color(0xFF141218)     // Material 3 dark surface container
-private val CinemaBevelCharcoal = Color(0xFF1A1A1A) // Film screen outer frame
+private val CinemaBevelCharcoal = Color(0xFF242426) // Film screen outer frame
 private val CoralError = Color(0xFFEF4444)          // Soft red alert accent
 private val ConsoleGreen = Color(0xFF34D399)        // Retro console green log highlights
 private val TextSilver = Color(0xFFE2E8F0)          // Slate-100 text
@@ -55,6 +56,11 @@ fun CinemaPlayerScreen(
     val errorMessage by viewModel.errorMessage.collectAsState()
     val showDebugPanel by viewModel.showDebugPanel.collectAsState()
 
+    // Themes & Layout Preferences State
+    val activeThemeId by viewModel.activeThemeId.collectAsState()
+    val activeThemePreset by viewModel.activeThemePreset.collectAsState()
+    val screenLayout by viewModel.screenLayout.collectAsState()
+
     val clipboardManager = LocalClipboardManager.current
     val configuration = LocalConfiguration.current
 
@@ -66,35 +72,6 @@ fun CinemaPlayerScreen(
             .fillMaxSize()
             .background(AubergineDarkBg)
     ) {
-        // 1. Cinema Backdrop Simulation (radial gradient from #2A2438 to transparent)
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .drawBehind {
-                    val radialBrush = Brush.radialGradient(
-                        colors = listOf(Color(0xFF2A2438).copy(alpha = 0.35f), Color.Transparent),
-                        center = androidx.compose.ui.geometry.Offset(size.width / 2, size.height * 0.25f),
-                        radius = size.width * 0.85f
-                    )
-                    drawRect(brush = radialBrush)
-                }
-        )
-
-        // 2. Linear/Grid backdrop simulation helper lines (opacity 3%)
-        Row(
-            modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            repeat(6) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .width(1.dp)
-                        .background(Color.White.copy(alpha = 0.03f))
-                )
-            }
-        }
-
         // Main Scaffold Layout containing Top Bar and dynamic adaptive play elements
         Scaffold(
             containerColor = Color.Transparent,
@@ -102,7 +79,8 @@ fun CinemaPlayerScreen(
                 CinemaTitleBar(
                     onToggleDebug = { viewModel.toggleDebugPanel() },
                     showDebugPanel = showDebugPanel,
-                    isFoldableActive = isExpandedLayout
+                    isFoldableActive = isExpandedLayout,
+                    activeThemeName = activeThemePreset.name
                 )
             }
         ) { paddingValues ->
@@ -115,7 +93,7 @@ fun CinemaPlayerScreen(
                         .padding(horizontal = 24.dp, vertical = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
-                    // Left Side: Projector Video Player Screen area (Elevated share)
+                    // Left Side: Projector Video Player Screen area with responsive drawn theme environment
                     Column(
                         modifier = Modifier
                             .weight(1.3f)
@@ -123,16 +101,21 @@ fun CinemaPlayerScreen(
                         verticalArrangement = Arrangement.Center
                     ) {
                         CinemaTheaterLayout(
+                            themePreset = activeThemePreset,
+                            screenLayout = screenLayout,
                             playableUri = playableUri,
                             errorMessage = errorMessage,
                             headers = requestHeaders,
                             onPlayTestVideo = { viewModel.playTestVideo() },
                             onClearPlaySource = { viewModel.setPlayableUri(null) },
-                            onPlaybackError = { detail -> viewModel.setErrorMessage(detail) }
+                            onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .weight(1f)
                         )
                     }
 
-                    // Right Side: Beautiful Dev Log / Intent Details panel (sliding-in collapsible card)
+                    // Right Side: Theme controls & telemetry log panel
                     AnimatedVisibility(
                         visible = showDebugPanel,
                         enter = fadeIn(),
@@ -141,7 +124,10 @@ fun CinemaPlayerScreen(
                             .weight(1f)
                             .fillMaxHeight()
                     ) {
-                        DebugConsolePanel(
+                        InteractiveConsolePanel(
+                            viewModel = viewModel,
+                            activeThemePreset = activeThemePreset,
+                            screenLayout = screenLayout,
                             parsedIntent = parsedIntent,
                             playableUri = playableUri,
                             errorMessage = errorMessage,
@@ -162,7 +148,7 @@ fun CinemaPlayerScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Top: Cinema projection layout area
+                    // Top: Ambient viewport projection area
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -170,25 +156,31 @@ fun CinemaPlayerScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         CinemaTheaterLayout(
+                            themePreset = activeThemePreset,
+                            screenLayout = screenLayout,
                             playableUri = playableUri,
                             errorMessage = errorMessage,
                             headers = requestHeaders,
                             onPlayTestVideo = { viewModel.playTestVideo() },
                             onClearPlaySource = { viewModel.setPlayableUri(null) },
-                            onPlaybackError = { detail -> viewModel.setErrorMessage(detail) }
+                            onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
+                            modifier = Modifier.fillMaxSize()
                         )
                     }
 
-                    // Bottom: Intent debugging console list
+                    // Bottom: Tabbed console interface (Themes, adjustments, and diagnostics)
                     AnimatedVisibility(
                         visible = showDebugPanel,
                         enter = fadeIn(),
                         exit = fadeOut(),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(1.1f)
+                            .weight(1.2f)
                     ) {
-                        DebugConsolePanel(
+                        InteractiveConsolePanel(
+                            viewModel = viewModel,
+                            activeThemePreset = activeThemePreset,
+                            screenLayout = screenLayout,
                             parsedIntent = parsedIntent,
                             playableUri = playableUri,
                             errorMessage = errorMessage,
@@ -213,7 +205,8 @@ fun CinemaPlayerScreen(
 fun CinemaTitleBar(
     onToggleDebug: () -> Unit,
     showDebugPanel: Boolean,
-    isFoldableActive: Boolean
+    isFoldableActive: Boolean,
+    activeThemeName: String
 ) {
     CenterAlignedTopAppBar(
         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -225,7 +218,6 @@ fun CinemaTitleBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Beautiful customized icon container with shadow-like tint
                 Box(
                     modifier = Modifier
                         .size(38.dp)
@@ -242,18 +234,25 @@ fun CinemaTitleBar(
                     )
                 }
 
-                Text(
-                    text = "Cinema Player",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = (-0.5).sp,
-                        fontFamily = FontFamily.SansSerif
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Cinema Player",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = (-0.5).sp,
+                            fontFamily = FontFamily.SansSerif
+                        )
                     )
-                )
+                    Text(
+                        text = "Theme: $activeThemeName",
+                        color = Color.LightGray.copy(alpha = 0.6f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Normal
+                    )
+                }
             }
         },
         actions = {
-            // Foldable Status active badge
             Box(
                 modifier = Modifier
                     .padding(end = 4.dp)
@@ -276,8 +275,8 @@ fun CinemaTitleBar(
                 modifier = Modifier.testTag("debug_console_toggle")
             ) {
                 Icon(
-                    imageVector = if (showDebugPanel) Icons.Default.BugReport else Icons.Default.Info,
-                    contentDescription = "Toggle Debugger Info",
+                    imageVector = if (showDebugPanel) Icons.Default.Tune else Icons.Default.Info,
+                    contentDescription = "Toggle Control Panel",
                     tint = if (showDebugPanel) IndigoPrimary else Color.LightGray,
                     modifier = Modifier.size(22.dp)
                 )
@@ -288,35 +287,59 @@ fun CinemaTitleBar(
 
 /**
  * Modern Projection Screen Frame designed with fine cinematic bevels and drop glow.
+ * Positions and resizes the ExoPlayer dynamically inside a drawn ambient backdrop based on percentage settings.
  */
 @Composable
 fun CinemaTheaterLayout(
+    themePreset: ThemePreset,
+    screenLayout: ScreenLayoutSettings,
     playableUri: String?,
     errorMessage: String?,
     headers: Map<String, String>,
     onPlayTestVideo: () -> Unit,
     onClearPlaySource: () -> Unit,
-    onPlaybackError: (String) -> Unit
+    onPlaybackError: (String) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
+    BoxWithConstraints(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .border(2.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(12.dp))
+            .background(Color.Black),
+        contentAlignment = Alignment.Center
     ) {
-        // High Contrast screen box simulation
+        val containerWidth = maxWidth
+        val containerHeight = maxHeight
+
+        // 1. Render the real-time drawn backdrop environment matching chosen theme
+        ThemeBackdrop(themeId = themePreset.id, modifier = Modifier.fillMaxSize())
+
+        // 2. Render localized backdrop dim overlay based on settings
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(16f / 9f)
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = screenLayout.dimAlpha))
+        )
+
+        // 3. Precision video screen viewport container mapped from settings percentages
+        val playerLeft = containerWidth * screenLayout.left
+        val playerTop = containerHeight * screenLayout.top
+        val playerWidth = containerWidth * screenLayout.width
+        val playerHeight = containerHeight * screenLayout.height
+
+        Box(
+            modifier = Modifier
+                .offset(x = playerLeft, y = playerTop)
+                .size(width = playerWidth, height = playerHeight)
                 .testTag("video_screen_container")
-                .clip(RoundedCornerShape(4.dp))
-                // Clean rectangular Cinema Screen framework with shadow glows
-                .border(4.dp, CinemaBevelCharcoal, RoundedCornerShape(4.dp))
+                .clip(RoundedCornerShape(6.dp))
+                .border(2.dp, CinemaBevelCharcoal, RoundedCornerShape(6.dp))
                 .drawBehind {
-                    // Simulating the elegant outer neon glow shadow in design [0_0_50px_rgba(79,70,229,0.15)]
+                    // Soft neon corner glow
                     drawRect(
-                        color = IndigoPrimary.copy(alpha = 0.08f),
-                        topLeft = androidx.compose.ui.geometry.Offset(-8f, -8f),
-                        size = androidx.compose.ui.geometry.Size(size.width + 16f, size.height + 16f)
+                        color = themePreset.primaryColor.copy(alpha = 0.15f),
+                        topLeft = androidx.compose.ui.geometry.Offset(-6f, -6f),
+                        size = androidx.compose.ui.geometry.Size(size.width + 12f, size.height + 12f)
                     )
                 }
                 .background(Color.Black),
@@ -330,11 +353,11 @@ fun CinemaTheaterLayout(
                     headers = headers
                 )
 
-                // Overlay Controls Corner Release
+                // Close/Stop Overlay Button in corner
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(12.dp),
+                        .padding(8.dp),
                     contentAlignment = Alignment.TopEnd
                 ) {
                     IconButton(
@@ -342,62 +365,69 @@ fun CinemaTheaterLayout(
                         colors = IconButtonDefaults.iconButtonColors(
                             containerColor = Color.Black.copy(alpha = 0.65f)
                         ),
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Stop streams",
                             tint = Color.White,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(15.dp)
                         )
                     }
                 }
             } else {
                 TheaterFallbackCurtain(
                     errorMessage = errorMessage,
-                    onPlayTestVideo = onPlayTestVideo
+                    onPlayTestVideo = onPlayTestVideo,
+                    primaryColor = themePreset.primaryColor
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Screen visual sub caption
-        Text(
-            text = "CINEMATIC SCREEN OVERLAY",
-            color = Color.White.copy(alpha = 0.35f),
-            style = MaterialTheme.typography.labelSmall.copy(
-                letterSpacing = 2.sp,
-                fontWeight = FontWeight.Bold
+        // 4. Ambient information overlay caption
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Text(
+                text = "${themePreset.name.uppercase()} ENVIRONMENT",
+                color = Color.White.copy(alpha = 0.3f),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    letterSpacing = 1.8.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.sp
+                )
             )
-        )
+        }
     }
 }
 
 /**
- * Display corresponding beautiful empty states matching Sophisticated Dark.
+ * Display corresponding beautiful empty states with customizable theme colors.
  */
 @Composable
 fun TheaterFallbackCurtain(
     errorMessage: String?,
-    onPlayTestVideo: () -> Unit
+    onPlayTestVideo: () -> Unit,
+    primaryColor: Color = Color(0xFF6366F1)
 ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(20.dp),
+            .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // SVG styled icon rendering
         Icon(
             imageVector = Icons.Default.Movie,
             contentDescription = null,
-            tint = Color.White.copy(alpha = 0.15f),
-            modifier = Modifier.size(52.dp)
+            tint = Color.White.copy(alpha = 0.12f),
+            modifier = Modifier.size(44.dp)
         )
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         if (!errorMessage.isNullOrBlank()) {
             Text(
@@ -409,54 +439,54 @@ fun TheaterFallbackCurtain(
                 ),
                 textAlign = TextAlign.Center
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = errorMessage,
-                color = TextSilver.copy(alpha = 0.8f),
+                color = TextSilver.copy(alpha = 0.85f),
                 style = MaterialTheme.typography.bodySmall,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 8.dp)
+                modifier = Modifier.padding(horizontal = 4.dp),
+                maxLines = 4
             )
         } else {
             Text(
-                text = "Waiting for Intent...",
-                color = TextSilver.copy(alpha = 0.8f),
+                text = "No stream selected",
+                color = TextSilver.copy(alpha = 0.75f),
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
                 textAlign = TextAlign.Center
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = "Supports HTTP, content, & file streaming URIs",
+                text = "Awaiting custom URI payload or external intent",
                 color = TextMuted,
                 style = MaterialTheme.typography.bodySmall,
                 textAlign = TextAlign.Center
             )
         }
 
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Large Action quick playback button (Indigo background matching layout) -> Rounded Full
         Button(
             onClick = onPlayTestVideo,
             colors = ButtonDefaults.buttonColors(
-                containerColor = IndigoPrimary,
+                containerColor = primaryColor,
                 contentColor = Color.White
             ),
             shape = CircleShape,
             modifier = Modifier
                 .testTag("play_test_button")
-                .height(44.dp),
-            contentPadding = PaddingValues(horizontal = 20.dp)
+                .height(38.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Refresh,
                 contentDescription = null,
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.size(15.dp)
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = "Test Playback URI",
-                style = MaterialTheme.typography.labelLarge.copy(
+                style = MaterialTheme.typography.labelMedium.copy(
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = 0.25.sp
                 )
@@ -466,10 +496,13 @@ fun TheaterFallbackCurtain(
 }
 
 /**
- * Bottom Dev Shell logs console panel showing parsed elements.
+ * Enhanced console container displaying customizable sliders, themes picker, and diagnostics.
  */
 @Composable
-fun DebugConsolePanel(
+fun InteractiveConsolePanel(
+    viewModel: MainViewModel,
+    activeThemePreset: ThemePreset,
+    screenLayout: ScreenLayoutSettings,
     parsedIntent: ParsedIntentInfo?,
     playableUri: String?,
     errorMessage: String?,
@@ -477,9 +510,10 @@ fun DebugConsolePanel(
     onClosePanel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Persistent bottom card mimicking Sophisticated Dark tailwind section
+    var selectedTab by remember { mutableStateOf(0) }
+
     Card(
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
         colors = CardDefaults.cardColors(
             containerColor = ObsidianSurface,
             contentColor = TextSilver
@@ -489,175 +523,448 @@ fun DebugConsolePanel(
             .border(
                 width = 1.dp,
                 color = Color.White.copy(alpha = 0.05f),
-                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
             )
             .testTag("intent_details_card")
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(18.dp)
-        ) {
-            // Header actions
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "INTENT DEBUG LOG",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.5.sp,
-                            color = Color.White.copy(alpha = 0.5f)
-                        )
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Header: Display Toggle Tabs
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = Color.Black.copy(alpha = 0.3f),
+                contentColor = IndigoPrimary,
+                indicator = { tabPositions ->
+                    TabRowDefaults.SecondaryIndicator(
+                        modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                        color = activeThemePreset.primaryColor
                     )
-
-                    // Double diagnostic pulse led dot layout
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Flashing green status indicator
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(ConsoleGreen)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.15f))
-                        )
-                    }
                 }
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Copy action button
-                    IconButton(
-                        onClick = onCopyLogs,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = "Copy debugging telemetry",
-                            tint = TextSilver.copy(alpha = 0.6f),
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-
-                    // Close action button
-                    IconButton(
-                        onClick = onClosePanel,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Dismiss Console",
-                            tint = Color.Gray,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
+            ) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.Palette, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Text("Tuning & Style", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    },
+                    selectedContentColor = Color.White,
+                    unselectedContentColor = TextMuted
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.Terminal, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Text("Debug Diagnostics", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    },
+                    selectedContentColor = Color.White,
+                    unselectedContentColor = TextMuted
+                )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Body display showing raw details
-            val scrollState = rememberScrollState()
-            Column(
+            // Body content depends on selected tab
+            Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .verticalScroll(scrollState),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Token line ACTION VIEW
-                val actionName = parsedIntent?.action ?: "android.intent.action.VIEW"
-                DebugLogToken(label = "ACTION", value = actionName, valueColor = TextSilver)
-
-                // Token line DATA URI
-                val dataVal = playableUri ?: parsedIntent?.dataUri ?: "Awaiting playback transfer..."
-                DebugLogToken(
-                    label = "DATA",
-                    value = dataVal,
-                    valueColor = if (playableUri != null) ConsoleGreen else TextSilver.copy(alpha = 0.5f),
-                    isUnderline = playableUri != null
-                )
-
-                // Token line MIME
-                val mimeVal = parsedIntent?.mimeType ?: "video/x-matroska"
-                DebugLogToken(label = "MIME", value = mimeVal, valueColor = TextSilver)
-
-                // Token line CLIPDATA
-                val clipCount = parsedIntent?.clipDataItems?.size ?: 0
-                DebugLogToken(
-                    label = "CLIP",
-                    value = if (clipCount > 0) "$clipCount item(s) detected" else "null (fallback text parser used)",
-                    valueColor = TextMuted
-                )
-
-                // If fallback error occurred, render beautiful warning banner block directly mimicking tailwind HTML:
-                // "p-3 rounded-2xl bg-red-900/20 border border-red-500/20 flex items-center gap-3"
-                if (!errorMessage.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Box(
+                if (selectedTab == 0) {
+                    // Tuning Tab Content
+                    Column(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(CoralError.copy(alpha = 0.15f))
-                            .border(1.dp, CoralError.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
-                            .padding(12.dp)
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
+                        // Section: Theme Presets
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "AMBIENT VIEWING PRESETS",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.2.sp,
+                                    color = Color.White.copy(alpha = 0.5f)
+                                )
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val activeThemeId by viewModel.activeThemeId.collectAsState()
+                                ThemePresets.all.forEach { preset ->
+                                    val isSelected = activeThemeId == preset.id
+                                    Card(
+                                        onClick = { viewModel.selectTheme(preset.id) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(58.dp)
+                                            .border(
+                                                width = if (isSelected) 2.dp else 1.dp,
+                                                color = if (isSelected) preset.primaryColor else Color.White.copy(alpha = 0.08f),
+                                                shape = RoundedCornerShape(10.dp)
+                                            ),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (isSelected) preset.secondaryColor.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.02f)
+                                        ),
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(6.dp),
+                                            verticalArrangement = Arrangement.Center,
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Icon(
+                                                imageVector = when (preset.id) {
+                                                    "cosy_cabin" -> Icons.Default.Weekend
+                                                    "sports_arena" -> Icons.Default.EmojiEvents
+                                                    else -> Icons.Default.Movie
+                                                },
+                                                contentDescription = null,
+                                                tint = if (isSelected) preset.primaryColor else Color.LightGray.copy(alpha = 0.5f),
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = preset.name,
+                                                color = if (isSelected) Color.White else Color.LightGray,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text(
+                                text = activeThemePreset.description,
+                                color = TextMuted,
+                                fontSize = 10.5.sp,
+                                lineHeight = 13.sp,
+                                modifier = Modifier.padding(top = 4.dp, start = 2.dp)
+                            )
+                        }
+
+                        Divider(color = Color.White.copy(alpha = 0.04f))
+
+                        // Section: Screen Position Sliders
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                text = "SCREEN POSITION & SIZE ADJUSTMENTS",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.2.sp,
+                                    color = Color.White.copy(alpha = 0.5f)
+                                )
+                            )
+
+                            TuningSlider(
+                                label = "Screen Width",
+                                value = screenLayout.width,
+                                range = 0.10f..1.00f,
+                                icon = Icons.Default.AspectRatio,
+                                activeColor = activeThemePreset.primaryColor,
+                                onValueChange = { newW ->
+                                    viewModel.updateScreenLayout(
+                                        left = screenLayout.left,
+                                        top = screenLayout.top,
+                                        width = newW,
+                                        height = screenLayout.height,
+                                        dimAlpha = screenLayout.dimAlpha
+                                    )
+                                }
+                            )
+
+                            TuningSlider(
+                                label = "Screen Height",
+                                value = screenLayout.height,
+                                range = 0.10f..1.00f,
+                                icon = Icons.Default.Height,
+                                activeColor = activeThemePreset.primaryColor,
+                                onValueChange = { newH ->
+                                    viewModel.updateScreenLayout(
+                                        left = screenLayout.left,
+                                        top = screenLayout.top,
+                                        width = screenLayout.width,
+                                        height = newH,
+                                        dimAlpha = screenLayout.dimAlpha
+                                    )
+                                }
+                            )
+
+                            TuningSlider(
+                                label = "Horizontal Position (Left)",
+                                value = screenLayout.left,
+                                range = 0.00f..(1.00f - screenLayout.width).coerceAtLeast(0.01f),
+                                icon = Icons.Default.ArrowBack,
+                                activeColor = activeThemePreset.primaryColor,
+                                onValueChange = { newL ->
+                                    viewModel.updateScreenLayout(
+                                        left = newL,
+                                        top = screenLayout.top,
+                                        width = screenLayout.width,
+                                        height = screenLayout.height,
+                                        dimAlpha = screenLayout.dimAlpha
+                                    )
+                                }
+                            )
+
+                            TuningSlider(
+                                label = "Vertical Position (Top)",
+                                value = screenLayout.top,
+                                range = 0.00f..(1.00f - screenLayout.height).coerceAtLeast(0.01f),
+                                icon = Icons.Default.ArrowUpward,
+                                activeColor = activeThemePreset.primaryColor,
+                                onValueChange = { newT ->
+                                    viewModel.updateScreenLayout(
+                                        left = screenLayout.left,
+                                        top = newT,
+                                        width = screenLayout.width,
+                                        height = screenLayout.height,
+                                        dimAlpha = screenLayout.dimAlpha
+                                    )
+                                }
+                            )
+
+                            TuningSlider(
+                                label = "Ambience Dimming",
+                                value = screenLayout.dimAlpha,
+                                range = 0.00f..0.95f,
+                                icon = Icons.Default.BrightnessMedium,
+                                activeColor = activeThemePreset.primaryColor,
+                                onValueChange = { newDim ->
+                                    viewModel.updateScreenLayout(
+                                        left = screenLayout.left,
+                                        top = screenLayout.top,
+                                        width = screenLayout.width,
+                                        height = screenLayout.height,
+                                        dimAlpha = newDim
+                                    )
+                                }
+                            )
+                        }
+
+                        Divider(color = Color.White.copy(alpha = 0.04f))
+
+                        // Reset Controls
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Error,
-                                contentDescription = "Alert",
-                                tint = CoralError,
-                                modifier = Modifier.size(18.dp)
+                            OutlinedButton(
+                                onClick = { viewModel.resetActiveThemeLayout() },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = activeThemePreset.primaryColor
+                                ),
+                                border = borderStroke(0.8.dp, activeThemePreset.primaryColor.copy(alpha = 0.4f)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.SettingsBackupRestore, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Reset Layout", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+
+                            OutlinedButton(
+                                onClick = { viewModel.resetAllToAppDefaults() },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = Color.LightGray
+                                ),
+                                border = borderStroke(0.8.dp, Color.White.copy(alpha = 0.15f)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Reset All", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                } else {
+                    // Diagnostics Tab Content (The original view details)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(18.dp)
+                    ) {
+                        // Header actions
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "INTENT METADATA LOG",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.5.sp,
+                                        color = Color.White.copy(alpha = 0.5f)
+                                    )
+                                )
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(ConsoleGreen)
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.White.copy(alpha = 0.15f))
+                                    )
+                                }
+                            }
+
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    onClick = onCopyLogs,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = "Copy debugging telemetry",
+                                        tint = TextSilver.copy(alpha = 0.6f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = onClosePanel,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Dismiss Console",
+                                        tint = Color.Gray,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        val scrollState = rememberScrollState()
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .verticalScroll(scrollState),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val actionName = parsedIntent?.action ?: "android.intent.action.VIEW"
+                            DebugLogToken(label = "ACTION", value = actionName, valueColor = TextSilver)
+
+                            val dataVal = playableUri ?: parsedIntent?.dataUri ?: "Awaiting playback transfer..."
+                            DebugLogToken(
+                                label = "DATA",
+                                value = dataVal,
+                                valueColor = if (playableUri != null) ConsoleGreen else TextSilver.copy(alpha = 0.5f),
+                                isUnderline = playableUri != null
+                            )
+
+                            val mimeVal = parsedIntent?.mimeType ?: "video/x-matroska"
+                            DebugLogToken(label = "MIME", value = mimeVal, valueColor = TextSilver)
+
+                            val clipCount = parsedIntent?.clipDataItems?.size ?: 0
+                            DebugLogToken(
+                                label = "CLIP",
+                                value = if (clipCount > 0) "$clipCount item(s) detected" else "null (fallback text parser used)",
+                                valueColor = TextMuted
+                            )
+
+                            if (!errorMessage.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(CoralError.copy(alpha = 0.15f))
+                                        .border(1.dp, CoralError.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                                        .padding(12.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Error,
+                                            contentDescription = "Alert",
+                                            tint = CoralError,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = "Playback warning Details:\n$errorMessage",
+                                            color = TextSilver,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Screen Width: ${LocalConfiguration.current.screenWidthDp}dp",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = TextMuted)
                             )
                             Text(
-                                text = "Playback warning: $errorMessage",
-                                color = TextSilver,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium
+                                text = "MIME: http, https, content, file",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = TextMuted)
                             )
                         }
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Footer info stats row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Screen Width: ${LocalConfiguration.current.screenWidthDp}dp",
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = TextMuted)
-                )
-                Text(
-                    text = "MIME: http, https, content, file",
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = TextMuted)
-                )
-            }
         }
     }
+}
+
+/**
+ * Helper Border Stroke generator.
+ */
+@Composable
+fun borderStroke(width: androidx.compose.ui.unit.Dp, color: Color): androidx.compose.foundation.BorderStroke {
+    return androidx.compose.foundation.BorderStroke(width, color)
 }
 
 /**
@@ -700,5 +1007,63 @@ fun DebugLogToken(
                 modifier = Modifier.weight(1f)
             )
         }
+    }
+}
+
+/**
+ * Elegant slider element with fine-aligned labeling.
+ */
+@Composable
+fun TuningSlider(
+    label: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    activeColor: Color,
+    onValueChange: (Float) -> Unit,
+    formatLabel: (Float) -> String = { "${(it * 100).toInt()}%" }
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = activeColor.copy(alpha = 0.82f),
+                    modifier = Modifier.size(15.dp)
+                )
+                Text(
+                    text = label,
+                    color = Color.White.copy(alpha = 0.9f),
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            Text(
+                text = formatLabel(value),
+                color = activeColor,
+                fontSize = 11.5.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = range,
+            colors = SliderDefaults.colors(
+                thumbColor = activeColor,
+                activeTrackColor = activeColor,
+                inactiveTrackColor = Color.White.copy(alpha = 0.08f)
+            ),
+            modifier = Modifier.height(30.dp)
+        )
     }
 }
