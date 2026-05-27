@@ -329,92 +329,70 @@ fun CinemaTheaterLayout(
     onLayoutChanged: (left: Float, top: Float, width: Float, height: Float) -> Unit = { _, _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
-    var canvasWidthPx by remember { mutableStateOf(1f) }
-    var canvasHeightPx by remember { mutableStateOf(1f) }
+    // 1. Live state tracking the detected aspect ratio of the active stream
+    var detectedRatio by remember { mutableStateOf(1.7777778f) } // default 16:9
 
-    val aspectPreset = AspectRatioPreset.getById(activeAspectRatioId)
-    val ratio = aspectPreset.ratio
+    // Ambient aspect ratio fallback when empty or on startup
+    val presetRatio = AspectRatioPreset.getById(activeAspectRatioId).ratio
+    val defaultRatioValue = presetRatio ?: 1.7777778f
 
-    // Auto-enforce ratio when ratio changes or sizes change (Only after settings are loaded to avoid startup default override race)
-    LaunchedEffect(activeAspectRatioId, canvasWidthPx, canvasHeightPx, isSettingsLoaded) {
-        if (!isSettingsLoaded) return@LaunchedEffect
-        if (canvasWidthPx > 10f && canvasHeightPx > 10f && ratio != null) {
-            val currentW = screenLayout.width
-            val targetH = (currentW * canvasWidthPx) / (ratio * canvasHeightPx)
-
-            if (targetH > 1.0f - screenLayout.top) {
-                val maxH = (1.0f - screenLayout.top).coerceIn(0.10f, 1.0f)
-                val targetW = (maxH * canvasHeightPx * ratio) / canvasWidthPx
-                val clampedW = targetW.coerceIn(0.10f, 1.0f - screenLayout.left)
-                val finalH = (clampedW * canvasWidthPx) / (ratio * canvasHeightPx)
-                onLayoutChanged(screenLayout.left, screenLayout.top, clampedW, finalH)
-            } else if (targetH < 0.10f) {
-                val minH = 0.10f
-                val targetW = (minH * canvasHeightPx * ratio) / canvasWidthPx
-                val clampedW = targetW.coerceIn(0.10f, 1.0f - screenLayout.left)
-                val finalH = (clampedW * canvasWidthPx) / (ratio * canvasHeightPx)
-                onLayoutChanged(screenLayout.left, screenLayout.top, clampedW, finalH)
-            } else {
-                onLayoutChanged(screenLayout.left, screenLayout.top, currentW, targetH)
-            }
+    // Reactively reset detectedRatio to default when playable source state changes
+    LaunchedEffect(playableUri) {
+        if (playableUri.isNullOrBlank()) {
+            detectedRatio = defaultRatioValue
         }
     }
 
     BoxWithConstraints(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.Transparent)
-            .onGloballyPositioned { coordinates ->
-                canvasWidthPx = coordinates.size.width.toFloat()
-                canvasHeightPx = coordinates.size.height.toFloat()
-            },
+            .background(Color.Transparent),
         contentAlignment = Alignment.Center
     ) {
-        val containerWidth = maxWidth
-        val containerHeight = maxHeight
+        val containerWidthVal = maxWidth.value
+        val containerHeightVal = maxHeight.value
+        val containerAreaVal = containerWidthVal * containerHeightVal
 
-        // 1. Render localized backdrop dim overlay based on settings
+        // 2. Localized backdrop dim overlay based on settings
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = screenLayout.dimAlpha))
         )
 
-        // 2. Precision video screen viewport container mapped from settings percentages
-        val playerLeft = containerWidth * screenLayout.left
-        val playerTop = containerHeight * screenLayout.top
-        val playerWidth = containerWidth * screenLayout.width
-        val playerHeight = containerHeight * screenLayout.height
+        // 3. Compute the centered player dimensions based on target area fraction (~0.65)
+        val targetAreaFraction = 0.65f
+        val aspectR = detectedRatio.coerceIn(0.3f, 3.5f) // sensible min/max bounds
 
-        // Read up-to-date states smoothly within pointerInput blocks without restart/interruption
-        val currentScreenLayout by rememberUpdatedState(screenLayout)
-        val currentRatio by rememberUpdatedState(ratio)
-        val currentWidthPx by rememberUpdatedState(canvasWidthPx)
-        val currentHeightPx by rememberUpdatedState(canvasHeightPx)
+        val targetArea = targetAreaFraction * containerAreaVal
+        val heightInit = kotlin.math.sqrt(targetArea / aspectR)
+        val widthInit = heightInit * aspectR
 
-        val moveModifier = if (isEditMode) {
-            Modifier.pointerInput(Unit) {
-                detectDragGestures { change, dragAmount ->
-                    change.consume()
-                    val canvasW = currentWidthPx
-                    val canvasH = currentHeightPx
-                    if (canvasW > 10f && canvasH > 10f) {
-                        val dX = dragAmount.x / canvasW
-                        val dY = dragAmount.y / canvasH
-                        val layout = currentScreenLayout
+        var calculatedWidth = widthInit
+        var calculatedHeight = heightInit
 
-                        val newLeft = (layout.left + dX).coerceIn(0f, 1f - layout.width)
-                        val newTop = (layout.top + dY).coerceIn(0f, 1f - layout.height)
-                        onLayoutChanged(newLeft, newTop, layout.width, layout.height)
-                    }
-                }
-            }
-        } else {
-            Modifier
+        // Clamp to always fit perfectly within parent container constraints without distortion
+        if (calculatedWidth > containerWidthVal) {
+            calculatedWidth = containerWidthVal
+            calculatedHeight = containerWidthVal / aspectR
         }
+        if (calculatedHeight > containerHeightVal) {
+            calculatedHeight = containerHeightVal
+            calculatedWidth = containerHeightVal * aspectR
+        }
+
+        // Apply a safe minimum bound to prevent potential collapsing layouts
+        calculatedWidth = calculatedWidth.coerceAtLeast(60f)
+        calculatedHeight = calculatedHeight.coerceAtLeast(60f)
+
+        val playerWidth = calculatedWidth.dp
+        val playerHeight = calculatedHeight.dp
+        val playerLeft = ((containerWidthVal - calculatedWidth) / 2f).dp
+        val playerTop = ((containerHeightVal - calculatedHeight) / 2f).dp
 
         val cornerShape = RoundedCornerShape(themePreset.cornerRadiusDp.dp)
 
+        // 4. Centered Player container frame matching chosen theme visual assets
         Box(
             modifier = Modifier
                 .offset(x = playerLeft, y = playerTop)
@@ -511,8 +489,7 @@ fun CinemaTheaterLayout(
                             )
                         }
                     }
-                }
-                .then(moveModifier),
+                },
             contentAlignment = Alignment.Center
         ) {
             Box(
@@ -533,7 +510,10 @@ fun CinemaTheaterLayout(
                         videoUrl = playableUri,
                         onPlaybackError = onPlaybackError,
                         modifier = Modifier.fillMaxSize(),
-                        headers = headers
+                        headers = headers,
+                        onVideoAspectRatioDetected = { ratio ->
+                            detectedRatio = ratio
+                        }
                     )
 
                     if (!isEditMode) {
@@ -571,203 +551,28 @@ fun CinemaTheaterLayout(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(themePreset.primaryColor.copy(alpha = 0.2f)),
+                            .background(themePreset.primaryColor.copy(alpha = 0.15f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(
-                                imageVector = Icons.Default.OpenWith,
+                                imageVector = Icons.Default.AspectRatio,
                                 contentDescription = null,
                                 tint = Color.White,
                                 modifier = Modifier.size(24.dp)
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "DRAG TO RE-POSITION",
+                                text = "ADAPTIVE ASPECT ACTIVE",
                                 color = Color.White,
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.2.sp
+                                    letterSpacing = 1.6.sp
                                 )
                             )
                         }
                     }
                 }
-            }
-        }
-
-        // 3. Custom Drag handles centered exactly over corners of player
-        if (isEditMode) {
-            // TOP-LEFT HANDLE
-            Box(
-                modifier = Modifier
-                    .offset(x = playerLeft - 24.dp, y = playerTop - 24.dp)
-                    .size(48.dp)
-                    .pointerInput(Unit) {
-                        detectDragGestures { change, dragAmount ->
-                            change.consume()
-                            val canvasW = currentWidthPx
-                            val canvasH = currentHeightPx
-                            if (canvasW > 10f && canvasH > 10f) {
-                                val dX = dragAmount.x / canvasW
-                                val dY = dragAmount.y / canvasH
-                                val layout = currentScreenLayout
-                                val rt = currentRatio
-
-                                val fixedRight = layout.left + layout.width
-                                val fixedBottom = layout.top + layout.height
-
-                                val updated = checkRatioResizeTopLeft(
-                                    newLeft = layout.left + dX,
-                                    newTop = layout.top + dY,
-                                    fixedRight = fixedRight,
-                                    fixedBottom = fixedBottom,
-                                    canvasWidth = canvasW,
-                                    canvasHeight = canvasH,
-                                    ratio = rt
-                                )
-                                onLayoutChanged(updated.left, updated.top, updated.width, updated.height)
-                            }
-                        }
-                    }
-                    .testTag("handle_top_left"),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(14.dp)
-                        .background(Color.White, CircleShape)
-                        .border(2.dp, themePreset.primaryColor, CircleShape)
-                )
-            }
-
-            // TOP-RIGHT HANDLE
-            Box(
-                modifier = Modifier
-                    .offset(x = playerLeft + playerWidth - 24.dp, y = playerTop - 24.dp)
-                    .size(48.dp)
-                    .pointerInput(Unit) {
-                        detectDragGestures { change, dragAmount ->
-                            change.consume()
-                            val canvasW = currentWidthPx
-                            val canvasH = currentHeightPx
-                            if (canvasW > 10f && canvasH > 10f) {
-                                val dX = dragAmount.x / canvasW
-                                val dY = dragAmount.y / canvasH
-                                val layout = currentScreenLayout
-                                val rt = currentRatio
-
-                                val fixedLeft = layout.left
-                                val fixedBottom = layout.top + layout.height
-
-                                val updated = checkRatioResizeTopRight(
-                                    newRight = layout.left + layout.width + dX,
-                                    newTop = layout.top + dY,
-                                    fixedLeft = fixedLeft,
-                                    fixedBottom = fixedBottom,
-                                    canvasWidth = canvasW,
-                                    canvasHeight = canvasH,
-                                    ratio = rt
-                                )
-                                onLayoutChanged(updated.left, updated.top, updated.width, updated.height)
-                            }
-                        }
-                    }
-                    .testTag("handle_top_right"),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(14.dp)
-                        .background(Color.White, CircleShape)
-                        .border(2.dp, themePreset.primaryColor, CircleShape)
-                )
-            }
-
-            // BOTTOM-LEFT HANDLE
-            Box(
-                modifier = Modifier
-                    .offset(x = playerLeft - 24.dp, y = playerTop + playerHeight - 24.dp)
-                    .size(48.dp)
-                    .pointerInput(Unit) {
-                        detectDragGestures { change, dragAmount ->
-                            change.consume()
-                            val canvasW = currentWidthPx
-                            val canvasH = currentHeightPx
-                            if (canvasW > 10f && canvasH > 10f) {
-                                val dX = dragAmount.x / canvasW
-                                val dY = dragAmount.y / canvasH
-                                val layout = currentScreenLayout
-                                val rt = currentRatio
-
-                                val fixedRight = layout.left + layout.width
-                                val fixedTop = layout.top
-
-                                val updated = checkRatioResizeBottomLeft(
-                                    newLeft = layout.left + dX,
-                                    newBottom = layout.top + layout.height + dY,
-                                    fixedRight = fixedRight,
-                                    fixedTop = fixedTop,
-                                    canvasWidth = canvasW,
-                                    canvasHeight = canvasH,
-                                    ratio = rt
-                                )
-                                onLayoutChanged(updated.left, updated.top, updated.width, updated.height)
-                            }
-                        }
-                    }
-                    .testTag("handle_bottom_left"),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(14.dp)
-                        .background(Color.White, CircleShape)
-                        .border(2.dp, themePreset.primaryColor, CircleShape)
-                )
-            }
-
-            // BOTTOM-RIGHT HANDLE
-            Box(
-                modifier = Modifier
-                    .offset(x = playerLeft + playerWidth - 24.dp, y = playerTop + playerHeight - 24.dp)
-                    .size(48.dp)
-                    .pointerInput(Unit) {
-                        detectDragGestures { change, dragAmount ->
-                            change.consume()
-                            val canvasW = currentWidthPx
-                            val canvasH = currentHeightPx
-                            if (canvasW > 10f && canvasH > 10f) {
-                                val dX = dragAmount.x / canvasW
-                                val dY = dragAmount.y / canvasH
-                                val layout = currentScreenLayout
-                                val rt = currentRatio
-
-                                val proposedW = layout.width + dX
-                                val proposedH = layout.height + dY
-
-                                val (finalW, finalH) = checkRatioResize(
-                                    newW = proposedW,
-                                    newH = proposedH,
-                                    left = layout.left,
-                                    top = layout.top,
-                                    canvasWidth = canvasW,
-                                    canvasHeight = canvasH,
-                                    ratio = rt
-                                )
-                                onLayoutChanged(layout.left, layout.top, finalW, finalH)
-                            }
-                        }
-                    }
-                    .testTag("handle_bottom_right"),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(14.dp)
-                        .background(Color.White, CircleShape)
-                        .border(2.dp, themePreset.primaryColor, CircleShape)
-                )
             }
         }
 

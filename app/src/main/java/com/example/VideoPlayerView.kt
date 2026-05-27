@@ -33,7 +33,8 @@ fun VideoPlayerView(
     videoUrl: String,
     onPlaybackError: (String) -> Unit,
     modifier: Modifier = Modifier,
-    headers: Map<String, String> = emptyMap()
+    headers: Map<String, String> = emptyMap(),
+    onVideoAspectRatioDetected: (Float) -> Unit = {}
 ) {
     val context = LocalContext.current
     var isLoading by remember { mutableStateOf(true) }
@@ -62,6 +63,14 @@ fun VideoPlayerView(
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 isLoading = playbackState == Player.STATE_BUFFERING
+            }
+
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                if (videoSize.width > 0 && videoSize.height > 0) {
+                    val rawRatio = videoSize.width.toFloat() / videoSize.height.toFloat()
+                    val ratio = rawRatio * videoSize.pixelWidthHeightRatio
+                    onVideoAspectRatioDetected(ratio)
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
