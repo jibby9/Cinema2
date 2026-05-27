@@ -32,6 +32,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isEditMode = MutableStateFlow(false)
     val isEditMode: StateFlow<Boolean> = _isEditMode.asStateFlow()
 
+    private val _isSettingsLoaded = MutableStateFlow(false)
+    val isSettingsLoaded: StateFlow<Boolean> = _isSettingsLoaded.asStateFlow()
+
     // Themes states
     private val _activeThemeId = MutableStateFlow("cinema")
     val activeThemeId: StateFlow<String> = _activeThemeId.asStateFlow()
@@ -81,8 +84,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             // Keep screen layout settings in sync with whichever theme is currently chosen
             _activeThemeId.collect { id ->
+                _isSettingsLoaded.value = false
                 preferenceManager.getLayoutSettings(id).collect { settings ->
-                    _screenLayout.value = settings
+                    if (_screenLayout.value != settings) {
+                        _screenLayout.value = settings
+                    }
+                    _isSettingsLoaded.value = true
                 }
             }
         }
@@ -99,6 +106,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun selectAspectRatio(id: String) {
         viewModelScope.launch {
             Log.d(TAG, "Selecting aspect ratio: $id")
+            _activeAspectRatioId.value = id
             preferenceManager.saveSelectedAspectRatio(id)
         }
     }
@@ -106,22 +114,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun selectTheme(themeId: String) {
         viewModelScope.launch {
             Log.d(TAG, "Selecting theme: $themeId")
+            _isSettingsLoaded.value = false
+            _activeThemeId.value = themeId
+            _activeThemePreset.value = ThemePresets.getById(themeId)
             preferenceManager.saveSelectedTheme(themeId)
         }
     }
 
+    private var saveSettingsJob: kotlinx.coroutines.Job? = null
+
     fun updateScreenLayout(left: Float, top: Float, width: Float, height: Float, dimAlpha: Float) {
-        viewModelScope.launch {
-            val currentPreset = _activeThemePreset.value
-            val settings = ScreenLayoutSettings(
-                left = left,
-                top = top,
-                width = width,
-                height = height,
-                dimAlpha = dimAlpha,
-                subtitleOffset = currentPreset.defaultSubtitleOffset
-            )
-            _screenLayout.value = settings
+        val currentPreset = _activeThemePreset.value
+        val settings = ScreenLayoutSettings(
+            left = left,
+            top = top,
+            width = width,
+            height = height,
+            dimAlpha = dimAlpha,
+            subtitleOffset = currentPreset.defaultSubtitleOffset
+        )
+        // 1. Instantly update in-memory state for fluid drag adjustments
+        _screenLayout.value = settings
+
+        // 2. Debounce backing up to DataStore (reduces extreme write pressure)
+        saveSettingsJob?.cancel()
+        saveSettingsJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(100) // 100ms is perfectly snappy and avoids UI lag
             preferenceManager.saveLayoutSettings(_activeThemeId.value, settings)
         }
     }
@@ -130,6 +148,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val id = _activeThemeId.value
             Log.d(TAG, "Resetting layout for theme $id")
+            val preset = ThemePresets.getById(id)
+            val defaultSettings = ScreenLayoutSettings(
+                left = preset.defaultLeft,
+                top = preset.defaultTop,
+                width = preset.defaultWidth,
+                height = preset.defaultHeight,
+                dimAlpha = preset.defaultDimAlpha,
+                subtitleOffset = preset.defaultSubtitleOffset
+            )
+            // Instantly apply in-memory
+            _screenLayout.value = defaultSettings
+            _isSettingsLoaded.value = true
+            // Save in background
             preferenceManager.resetThemeToDefault(id)
         }
     }
@@ -137,6 +168,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun resetAllToAppDefaults() {
         viewModelScope.launch {
             Log.d(TAG, "Resetting all settings to app defaults")
+            val preset = ThemePresets.Cinema
+            val defaultSettings = ScreenLayoutSettings(
+                left = preset.defaultLeft,
+                top = preset.defaultTop,
+                width = preset.defaultWidth,
+                height = preset.defaultHeight,
+                dimAlpha = preset.defaultDimAlpha,
+                subtitleOffset = preset.defaultSubtitleOffset
+            )
+            // Instantly apply in-memory
+            _screenLayout.value = defaultSettings
+            _activeThemeId.value = "cinema"
+            _activeThemePreset.value = preset
+            _activeAspectRatioId.value = "free"
+            _isSettingsLoaded.value = true
+            // Save in background
             preferenceManager.resetAllSettings()
         }
     }

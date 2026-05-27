@@ -65,6 +65,7 @@ fun CinemaPlayerScreen(
     val screenLayout by viewModel.screenLayout.collectAsState()
     val isEditMode by viewModel.isEditMode.collectAsState()
     val activeAspectRatioId by viewModel.activeAspectRatioId.collectAsState()
+    val isSettingsLoaded by viewModel.isSettingsLoaded.collectAsState()
 
     val clipboardManager = LocalClipboardManager.current
     val configuration = LocalConfiguration.current
@@ -75,8 +76,14 @@ fun CinemaPlayerScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(AubergineDarkBg)
     ) {
+        // Core Full-Screen Immersive Theme Backdrop - covering whole folding/inner screen area
+        ThemeBackdrop(
+            themePreset = activeThemePreset,
+            isEditMode = isEditMode,
+            modifier = Modifier.fillMaxSize()
+        )
+
         // Main Scaffold Layout containing Top Bar and dynamic adaptive play elements
         Scaffold(
             containerColor = Color.Transparent,
@@ -116,6 +123,7 @@ fun CinemaPlayerScreen(
                             onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
                             isEditMode = isEditMode,
                             activeAspectRatioId = activeAspectRatioId,
+                            isSettingsLoaded = isSettingsLoaded,
                             onLayoutChanged = { left, top, width, height ->
                                 viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
                             },
@@ -176,6 +184,7 @@ fun CinemaPlayerScreen(
                             onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
                             isEditMode = isEditMode,
                             activeAspectRatioId = activeAspectRatioId,
+                            isSettingsLoaded = isSettingsLoaded,
                             onLayoutChanged = { left, top, width, height ->
                                 viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
                             },
@@ -316,6 +325,7 @@ fun CinemaTheaterLayout(
     onPlaybackError: (String) -> Unit,
     isEditMode: Boolean = false,
     activeAspectRatioId: String = "free",
+    isSettingsLoaded: Boolean = true,
     onLayoutChanged: (left: Float, top: Float, width: Float, height: Float) -> Unit = { _, _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
@@ -325,9 +335,10 @@ fun CinemaTheaterLayout(
     val aspectPreset = AspectRatioPreset.getById(activeAspectRatioId)
     val ratio = aspectPreset.ratio
 
-    // Auto-enforce ratio when ratio changes or sizes change
-    LaunchedEffect(activeAspectRatioId, canvasWidthPx, canvasHeightPx) {
-        if (canvasWidthPx > 1f && canvasHeightPx > 1f && ratio != null) {
+    // Auto-enforce ratio when ratio changes or sizes change (Only after settings are loaded to avoid startup default override race)
+    LaunchedEffect(activeAspectRatioId, canvasWidthPx, canvasHeightPx, isSettingsLoaded) {
+        if (!isSettingsLoaded) return@LaunchedEffect
+        if (canvasWidthPx > 10f && canvasHeightPx > 10f && ratio != null) {
             val currentW = screenLayout.width
             val targetH = (currentW * canvasWidthPx) / (ratio * canvasHeightPx)
 
@@ -352,8 +363,7 @@ fun CinemaTheaterLayout(
     BoxWithConstraints(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .border(2.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(12.dp))
-            .background(Color.Black)
+            .background(Color.Transparent)
             .onGloballyPositioned { coordinates ->
                 canvasWidthPx = coordinates.size.width.toFloat()
                 canvasHeightPx = coordinates.size.height.toFloat()
@@ -363,32 +373,40 @@ fun CinemaTheaterLayout(
         val containerWidth = maxWidth
         val containerHeight = maxHeight
 
-        // 1. Render the real-time drawn backdrop environment matching chosen theme
-        ThemeBackdrop(themePreset = themePreset, isEditMode = isEditMode, modifier = Modifier.fillMaxSize())
-
-        // 2. Render localized backdrop dim overlay based on settings
+        // 1. Render localized backdrop dim overlay based on settings
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = screenLayout.dimAlpha))
         )
 
-        // 3. Precision video screen viewport container mapped from settings percentages
+        // 2. Precision video screen viewport container mapped from settings percentages
         val playerLeft = containerWidth * screenLayout.left
         val playerTop = containerHeight * screenLayout.top
         val playerWidth = containerWidth * screenLayout.width
         val playerHeight = containerHeight * screenLayout.height
 
+        // Read up-to-date states smoothly within pointerInput blocks without restart/interruption
+        val currentScreenLayout by rememberUpdatedState(screenLayout)
+        val currentRatio by rememberUpdatedState(ratio)
+        val currentWidthPx by rememberUpdatedState(canvasWidthPx)
+        val currentHeightPx by rememberUpdatedState(canvasHeightPx)
+
         val moveModifier = if (isEditMode) {
-            Modifier.pointerInput(canvasWidthPx, canvasHeightPx, screenLayout) {
+            Modifier.pointerInput(Unit) {
                 detectDragGestures { change, dragAmount ->
                     change.consume()
-                    val dX = dragAmount.x / canvasWidthPx
-                    val dY = dragAmount.y / canvasHeightPx
+                    val canvasW = currentWidthPx
+                    val canvasH = currentHeightPx
+                    if (canvasW > 10f && canvasH > 10f) {
+                        val dX = dragAmount.x / canvasW
+                        val dY = dragAmount.y / canvasH
+                        val layout = currentScreenLayout
 
-                    val newLeft = (screenLayout.left + dX).coerceIn(0f, 1f - screenLayout.width)
-                    val newTop = (screenLayout.top + dY).coerceIn(0f, 1f - screenLayout.height)
-                    onLayoutChanged(newLeft, newTop, screenLayout.width, screenLayout.height)
+                        val newLeft = (layout.left + dX).coerceIn(0f, 1f - layout.width)
+                        val newTop = (layout.top + dY).coerceIn(0f, 1f - layout.height)
+                        onLayoutChanged(newLeft, newTop, layout.width, layout.height)
+                    }
                 }
             }
         } else {
@@ -407,7 +425,7 @@ fun CinemaTheaterLayout(
                     val glowCol = themePreset.glowColor
                     val shadowFactor = themePreset.shadowIntensity
                     
-                    // 1. Draw premium ambient drop-glow / bloom behind the screen
+                    // Immersive drop-glow behind the video stream
                     if (glowRadius > 0f) {
                         val passes = 6
                         for (i in 1..passes) {
@@ -448,14 +466,12 @@ fun CinemaTheaterLayout(
                         )
                     }
                 )
-                // Draw elegant theme-specific wood grain or neon markings
                 .drawBehind {
                     val width = size.width
                     val height = size.height
                     
                     when (themePreset.id.lowercase()) {
                         "cosy_cabin" -> {
-                            // Draw warm woody timber grains behind the screen padding area
                             val grainColor = Color(0xFF5C2D16).copy(alpha = 0.35f)
                             for (i in listOf(4f, 8f, 12f)) {
                                 drawRoundRect(
@@ -471,7 +487,6 @@ fun CinemaTheaterLayout(
                             }
                         }
                         "sports_arena" -> {
-                            // Jumbotron cyber neon frame outline
                             val neonLineColor = Color(0xFF10B981).copy(alpha = 0.35f)
                             drawRoundRect(
                                 color = neonLineColor,
@@ -485,7 +500,6 @@ fun CinemaTheaterLayout(
                             )
                         }
                         "cinema" -> {
-                            // Linear bevel overlay
                             drawRect(
                                 brush = Brush.verticalGradient(
                                     colors = listOf(
@@ -501,7 +515,6 @@ fun CinemaTheaterLayout(
                 .then(moveModifier),
             contentAlignment = Alignment.Center
         ) {
-            // Inner video viewport framed by padding matching theme thickness
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -523,7 +536,6 @@ fun CinemaTheaterLayout(
                         headers = headers
                     )
 
-                    // Close/Stop Overlay Button in corner (Hidden during edit mode)
                     if (!isEditMode) {
                         Box(
                             modifier = Modifier
@@ -584,32 +596,38 @@ fun CinemaTheaterLayout(
             }
         }
 
-        // 4. Custom Drag handles centered exactly over corners of player
+        // 3. Custom Drag handles centered exactly over corners of player
         if (isEditMode) {
             // TOP-LEFT HANDLE
             Box(
                 modifier = Modifier
                     .offset(x = playerLeft - 24.dp, y = playerTop - 24.dp)
                     .size(48.dp)
-                    .pointerInput(canvasWidthPx, canvasHeightPx, screenLayout, ratio) {
+                    .pointerInput(Unit) {
                         detectDragGestures { change, dragAmount ->
                             change.consume()
-                            val dX = dragAmount.x / canvasWidthPx
-                            val dY = dragAmount.y / canvasHeightPx
+                            val canvasW = currentWidthPx
+                            val canvasH = currentHeightPx
+                            if (canvasW > 10f && canvasH > 10f) {
+                                val dX = dragAmount.x / canvasW
+                                val dY = dragAmount.y / canvasH
+                                val layout = currentScreenLayout
+                                val rt = currentRatio
 
-                            val fixedRight = screenLayout.left + screenLayout.width
-                            val fixedBottom = screenLayout.top + screenLayout.height
+                                val fixedRight = layout.left + layout.width
+                                val fixedBottom = layout.top + layout.height
 
-                            val updated = checkRatioResizeTopLeft(
-                                newLeft = screenLayout.left + dX,
-                                newTop = screenLayout.top + dY,
-                                fixedRight = fixedRight,
-                                fixedBottom = fixedBottom,
-                                canvasWidth = canvasWidthPx,
-                                canvasHeight = canvasHeightPx,
-                                ratio = ratio
-                            )
-                            onLayoutChanged(updated.left, updated.top, updated.width, updated.height)
+                                val updated = checkRatioResizeTopLeft(
+                                    newLeft = layout.left + dX,
+                                    newTop = layout.top + dY,
+                                    fixedRight = fixedRight,
+                                    fixedBottom = fixedBottom,
+                                    canvasWidth = canvasW,
+                                    canvasHeight = canvasH,
+                                    ratio = rt
+                                )
+                                onLayoutChanged(updated.left, updated.top, updated.width, updated.height)
+                            }
                         }
                     }
                     .testTag("handle_top_left"),
@@ -628,25 +646,31 @@ fun CinemaTheaterLayout(
                 modifier = Modifier
                     .offset(x = playerLeft + playerWidth - 24.dp, y = playerTop - 24.dp)
                     .size(48.dp)
-                    .pointerInput(canvasWidthPx, canvasHeightPx, screenLayout, ratio) {
+                    .pointerInput(Unit) {
                         detectDragGestures { change, dragAmount ->
                             change.consume()
-                            val dX = dragAmount.x / canvasWidthPx
-                            val dY = dragAmount.y / canvasHeightPx
+                            val canvasW = currentWidthPx
+                            val canvasH = currentHeightPx
+                            if (canvasW > 10f && canvasH > 10f) {
+                                val dX = dragAmount.x / canvasW
+                                val dY = dragAmount.y / canvasH
+                                val layout = currentScreenLayout
+                                val rt = currentRatio
 
-                            val fixedLeft = screenLayout.left
-                            val fixedBottom = screenLayout.top + screenLayout.height
+                                val fixedLeft = layout.left
+                                val fixedBottom = layout.top + layout.height
 
-                            val updated = checkRatioResizeTopRight(
-                                newRight = screenLayout.left + screenLayout.width + dX,
-                                newTop = screenLayout.top + dY,
-                                fixedLeft = fixedLeft,
-                                fixedBottom = fixedBottom,
-                                canvasWidth = canvasWidthPx,
-                                canvasHeight = canvasHeightPx,
-                                ratio = ratio
-                            )
-                            onLayoutChanged(updated.left, updated.top, updated.width, updated.height)
+                                val updated = checkRatioResizeTopRight(
+                                    newRight = layout.left + layout.width + dX,
+                                    newTop = layout.top + dY,
+                                    fixedLeft = fixedLeft,
+                                    fixedBottom = fixedBottom,
+                                    canvasWidth = canvasW,
+                                    canvasHeight = canvasH,
+                                    ratio = rt
+                                )
+                                onLayoutChanged(updated.left, updated.top, updated.width, updated.height)
+                            }
                         }
                     }
                     .testTag("handle_top_right"),
@@ -665,25 +689,31 @@ fun CinemaTheaterLayout(
                 modifier = Modifier
                     .offset(x = playerLeft - 24.dp, y = playerTop + playerHeight - 24.dp)
                     .size(48.dp)
-                    .pointerInput(canvasWidthPx, canvasHeightPx, screenLayout, ratio) {
+                    .pointerInput(Unit) {
                         detectDragGestures { change, dragAmount ->
                             change.consume()
-                            val dX = dragAmount.x / canvasWidthPx
-                            val dY = dragAmount.y / canvasHeightPx
+                            val canvasW = currentWidthPx
+                            val canvasH = currentHeightPx
+                            if (canvasW > 10f && canvasH > 10f) {
+                                val dX = dragAmount.x / canvasW
+                                val dY = dragAmount.y / canvasH
+                                val layout = currentScreenLayout
+                                val rt = currentRatio
 
-                            val fixedRight = screenLayout.left + screenLayout.width
-                            val fixedTop = screenLayout.top
+                                val fixedRight = layout.left + layout.width
+                                val fixedTop = layout.top
 
-                            val updated = checkRatioResizeBottomLeft(
-                                newLeft = screenLayout.left + dX,
-                                newBottom = screenLayout.top + screenLayout.height + dY,
-                                fixedRight = fixedRight,
-                                fixedTop = fixedTop,
-                                canvasWidth = canvasWidthPx,
-                                canvasHeight = canvasHeightPx,
-                                ratio = ratio
-                            )
-                            onLayoutChanged(updated.left, updated.top, updated.width, updated.height)
+                                val updated = checkRatioResizeBottomLeft(
+                                    newLeft = layout.left + dX,
+                                    newBottom = layout.top + layout.height + dY,
+                                    fixedRight = fixedRight,
+                                    fixedTop = fixedTop,
+                                    canvasWidth = canvasW,
+                                    canvasHeight = canvasH,
+                                    ratio = rt
+                                )
+                                onLayoutChanged(updated.left, updated.top, updated.width, updated.height)
+                            }
                         }
                     }
                     .testTag("handle_bottom_left"),
@@ -702,25 +732,31 @@ fun CinemaTheaterLayout(
                 modifier = Modifier
                     .offset(x = playerLeft + playerWidth - 24.dp, y = playerTop + playerHeight - 24.dp)
                     .size(48.dp)
-                    .pointerInput(canvasWidthPx, canvasHeightPx, screenLayout, ratio) {
+                    .pointerInput(Unit) {
                         detectDragGestures { change, dragAmount ->
                             change.consume()
-                            val dX = dragAmount.x / canvasWidthPx
-                            val dY = dragAmount.y / canvasHeightPx
+                            val canvasW = currentWidthPx
+                            val canvasH = currentHeightPx
+                            if (canvasW > 10f && canvasH > 10f) {
+                                val dX = dragAmount.x / canvasW
+                                val dY = dragAmount.y / canvasH
+                                val layout = currentScreenLayout
+                                val rt = currentRatio
 
-                            val proposedW = screenLayout.width + dX
-                            val proposedH = screenLayout.height + dY
+                                val proposedW = layout.width + dX
+                                val proposedH = layout.height + dY
 
-                            val (finalW, finalH) = checkRatioResize(
-                                newW = proposedW,
-                                newH = proposedH,
-                                left = screenLayout.left,
-                                top = screenLayout.top,
-                                canvasWidth = canvasWidthPx,
-                                canvasHeight = canvasHeightPx,
-                                ratio = ratio
-                            )
-                            onLayoutChanged(screenLayout.left, screenLayout.top, finalW, finalH)
+                                val (finalW, finalH) = checkRatioResize(
+                                    newW = proposedW,
+                                    newH = proposedH,
+                                    left = layout.left,
+                                    top = layout.top,
+                                    canvasWidth = canvasW,
+                                    canvasHeight = canvasH,
+                                    ratio = rt
+                                )
+                                onLayoutChanged(layout.left, layout.top, finalW, finalH)
+                            }
                         }
                     }
                     .testTag("handle_bottom_right"),
