@@ -1,0 +1,6 @@
+{
+  "name": "Cinema Player",
+  "description": "An installed Android video player designed for foldable inner displays. Acts as an external player to receive shared video links and playable stream URIs through intents.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
