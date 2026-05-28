@@ -74,6 +74,7 @@ fun CinemaPlayerScreen(
 
     val clipboardManager = LocalClipboardManager.current
     val configuration = LocalConfiguration.current
+    val customBackgroundUri by viewModel.customBgUri.collectAsState()
 
     // Screen classification: if screenWidthDp >= 600, treat as tablet or unfolded foldable inner display.
     val isExpandedLayout = configuration.screenWidthDp >= 600
@@ -86,6 +87,7 @@ fun CinemaPlayerScreen(
         ThemeBackdrop(
             themePreset = activeThemePreset,
             isEditMode = isEditMode,
+            customBackgroundUri = customBackgroundUri,
             modifier = Modifier.fillMaxSize()
         )
 
@@ -1009,6 +1011,17 @@ fun InteractiveConsolePanel(
     var selectedTab by remember { mutableStateOf(0) }
     val isEditMode by viewModel.isEditMode.collectAsState()
     val activeAspectRatioId by viewModel.activeAspectRatioId.collectAsState()
+    val customBackgroundUri by viewModel.customBgUri.collectAsState()
+    val activeThemeId by viewModel.activeThemeId.collectAsState()
+
+    val photoPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+        onResult = { uri ->
+            if (uri != null) {
+                viewModel.saveCustomBackgroundFromUri(uri)
+            }
+        }
+    )
 
     Card(
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
@@ -1100,7 +1113,6 @@ fun InteractiveConsolePanel(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                val activeThemeId by viewModel.activeThemeId.collectAsState()
                                 ThemePresets.all.forEach { preset ->
                                     val isSelected = activeThemeId == preset.id
                                     Card(
@@ -1129,6 +1141,7 @@ fun InteractiveConsolePanel(
                                                 imageVector = when (preset.id) {
                                                     "cosy_cabin" -> Icons.Default.Weekend
                                                     "sports_arena" -> Icons.Default.EmojiEvents
+                                                    "custom" -> Icons.Default.Image
                                                     else -> Icons.Default.Movie
                                                 },
                                                 contentDescription = null,
@@ -1154,6 +1167,107 @@ fun InteractiveConsolePanel(
                                 lineHeight = 13.sp,
                                 modifier = Modifier.padding(top = 4.dp, start = 2.dp)
                             )
+
+                            if (activeThemeId == "custom") {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color.White.copy(alpha = 0.03f))
+                                        .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Custom visual preview box
+                                    Box(
+                                        modifier = Modifier
+                                            .size(52.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color.Black.copy(alpha = 0.35f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (!customBackgroundUri.isNullOrBlank()) {
+                                            coil.compose.AsyncImage(
+                                                model = customBackgroundUri,
+                                                contentDescription = "Custom photo background thumbnail preview",
+                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = Icons.Default.Image,
+                                                contentDescription = "No image selected",
+                                                tint = Color.White.copy(alpha = 0.25f),
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                        }
+                                    }
+
+                                    // Controls Column
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = if (!customBackgroundUri.isNullOrBlank()) "Custom Image Loaded" else "No Background Selected",
+                                            color = Color.White,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = if (!customBackgroundUri.isNullOrBlank()) "Your custom image is set as the background backdrop." else "Pick an image from library to act as ambient projection wall.",
+                                            color = TextMuted,
+                                            fontSize = 9.5.sp,
+                                            lineHeight = 11.5.sp
+                                        )
+
+                                        Spacer(modifier = Modifier.height(3.dp))
+
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            // Pick trigger button
+                                            Button(
+                                                onClick = {
+                                                    photoPickerLauncher.launch(
+                                                        androidx.activity.result.PickVisualMediaRequest(
+                                                            androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly
+                                                        )
+                                                    )
+                                                },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = activeThemePreset.primaryColor,
+                                                    contentColor = Color.White
+                                                ),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                                modifier = Modifier.height(28.dp).testTag("select_custom_background_btn")
+                                            ) {
+                                                Text("Choose Image", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            }
+
+                                            // Clear trigger button
+                                            if (!customBackgroundUri.isNullOrBlank()) {
+                                                Button(
+                                                    onClick = {
+                                                        viewModel.setCustomBackground(null)
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = Color.White.copy(alpha = 0.08f),
+                                                        contentColor = Color.LightGray
+                                                    ),
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                                    modifier = Modifier.height(28.dp).testTag("remove_custom_background_btn")
+                                                ) {
+                                                    Text("Remove", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         Divider(color = Color.White.copy(alpha = 0.04f))

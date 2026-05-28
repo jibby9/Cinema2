@@ -112,7 +112,31 @@ object ThemePresets {
         ambientColorTint = Color(0x1534D399) // Cool green stadium tint
     )
 
-    val all = listOf(Cinema, CosyCabin, SportsArena)
+    val Custom = ThemePreset(
+        id = "custom",
+        name = "Custom Theme",
+        description = "Set your own personal backdrop with custom pictures, custom scale, and custom layout positions.",
+        defaultLeft = 0.10f,
+        defaultTop = 0.15f,
+        defaultWidth = 0.80f,
+        defaultHeight = 0.45f,
+        defaultDimAlpha = 0.70f,
+        defaultSubtitleOffset = 0.05f,
+        primaryColor = Color(0xFFEC4899), // Pink / Rose Accent
+        secondaryColor = Color(0xFF4C0519), // Deep Rose Accent
+        cornerRadiusDp = 12,
+        frameThicknessDp = 5,
+        frameColor = Color(0xFF1E1B20), // Dark grey border with soft warmth
+        glowColor = Color(0x3BEC4899), // Neon Rose flow and drop glow
+        glowRadiusDp = 12,
+        shadowIntensity = 0.45f,
+        vignetteStrength = 0.6f,
+        ambientColorTint = Color(0x13EC4899), // Muted Pink ambient tint
+        backdropImageResId = null,
+        foregroundImageResId = null
+    )
+
+    val all = listOf(Cinema, CosyCabin, SportsArena, Custom)
 
     fun getById(id: String): ThemePreset {
         return all.find { it.id.lowercase() == id.lowercase() } ?: Cinema

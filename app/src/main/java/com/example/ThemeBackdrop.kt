@@ -13,11 +13,13 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import android.util.Log
 
 @Composable
 fun ThemeBackdrop(
     themePreset: ThemePreset,
     isEditMode: Boolean = false,
+    customBackgroundUri: String? = null,
     modifier: Modifier = Modifier
 ) {
     val themeId = themePreset.id
@@ -246,6 +248,37 @@ fun ThemeBackdrop(
                             radius = 60f
                         )
                     )
+                }
+            }
+
+            "custom" -> {
+                if (!customBackgroundUri.isNullOrBlank()) {
+                    // Modern Coil AsyncImage for loading custom background image from internal storage or URI
+                    coil.compose.AsyncImage(
+                        model = customBackgroundUri,
+                        contentDescription = "Custom theme backdrop background",
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                        onError = { errorState ->
+                            Log.e("ThemeBackdrop", "Failed to load custom background image", errorState.result.throwable)
+                        }
+                    )
+                } else {
+                    // Fallback background layout if custom background is not loaded
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val width = size.width
+                        val height = size.height
+                        drawRect(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0xFFEC4899).copy(alpha = 0.18f), // Soft dark pink ambient glow
+                                    Color(0xFF030204)
+                                ),
+                                center = Offset(width / 2f, height / 2f),
+                                radius = width * 0.85f
+                            )
+                        )
+                    }
                 }
             }
 

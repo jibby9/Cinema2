@@ -36,6 +36,14 @@ class PlayerPreferenceManager(private val context: Context) {
         val KEY_SPORTS_WIDTH = floatPreferencesKey("sports_width")
         val KEY_SPORTS_HEIGHT = floatPreferencesKey("sports_height")
         val KEY_SPORTS_DIM = floatPreferencesKey("sports_dim_alpha")
+
+        // Tema: Custom positions & image
+        val KEY_CUSTOM_LEFT = floatPreferencesKey("custom_left")
+        val KEY_CUSTOM_TOP = floatPreferencesKey("custom_top")
+        val KEY_CUSTOM_WIDTH = floatPreferencesKey("custom_width")
+        val KEY_CUSTOM_HEIGHT = floatPreferencesKey("custom_height")
+        val KEY_CUSTOM_DIM = floatPreferencesKey("custom_dim_alpha")
+        val KEY_CUSTOM_BACKGROUND_URI = stringPreferencesKey("custom_background_uri")
     }
 
     /**
@@ -60,6 +68,23 @@ class PlayerPreferenceManager(private val context: Context) {
     }
 
     /**
+     * Emits the custom theme background image URI string (if set).
+     */
+    val customBackgroundUri: Flow<String?> = context.dataStore.data.map { preferences ->
+        preferences[KEY_CUSTOM_BACKGROUND_URI]
+    }
+
+    suspend fun saveCustomBackgroundUri(uriString: String?) {
+        context.dataStore.edit { preferences ->
+            if (uriString == null) {
+                preferences.remove(KEY_CUSTOM_BACKGROUND_URI)
+            } else {
+                preferences[KEY_CUSTOM_BACKGROUND_URI] = uriString
+            }
+        }
+    }
+
+    /**
      * Emits the specific layout settings for the given theme ID.
      */
     fun getLayoutSettings(themeId: String): Flow<ScreenLayoutSettings> {
@@ -80,6 +105,14 @@ class PlayerPreferenceManager(private val context: Context) {
                     width = preferences[KEY_SPORTS_WIDTH] ?: preset.defaultWidth,
                     height = preferences[KEY_SPORTS_HEIGHT] ?: preset.defaultHeight,
                     dimAlpha = preferences[KEY_SPORTS_DIM] ?: preset.defaultDimAlpha,
+                    subtitleOffset = preset.defaultSubtitleOffset
+                )
+                "custom" -> ScreenLayoutSettings(
+                    left = preferences[KEY_CUSTOM_LEFT] ?: preset.defaultLeft,
+                    top = preferences[KEY_CUSTOM_TOP] ?: preset.defaultTop,
+                    width = preferences[KEY_CUSTOM_WIDTH] ?: preset.defaultWidth,
+                    height = preferences[KEY_CUSTOM_HEIGHT] ?: preset.defaultHeight,
+                    dimAlpha = preferences[KEY_CUSTOM_DIM] ?: preset.defaultDimAlpha,
                     subtitleOffset = preset.defaultSubtitleOffset
                 )
                 else -> ScreenLayoutSettings(
@@ -141,6 +174,13 @@ class PlayerPreferenceManager(private val context: Context) {
                     preferences[KEY_SPORTS_HEIGHT] = settings.height
                     preferences[KEY_SPORTS_DIM] = settings.dimAlpha
                 }
+                "custom" -> {
+                    preferences[KEY_CUSTOM_LEFT] = settings.left
+                    preferences[KEY_CUSTOM_TOP] = settings.top
+                    preferences[KEY_CUSTOM_WIDTH] = settings.width
+                    preferences[KEY_CUSTOM_HEIGHT] = settings.height
+                    preferences[KEY_CUSTOM_DIM] = settings.dimAlpha
+                }
                 else -> {
                     preferences[KEY_CINEMA_LEFT] = settings.left
                     preferences[KEY_CINEMA_TOP] = settings.top
@@ -171,6 +211,13 @@ class PlayerPreferenceManager(private val context: Context) {
                     preferences.remove(KEY_SPORTS_WIDTH)
                     preferences.remove(KEY_SPORTS_HEIGHT)
                     preferences.remove(KEY_SPORTS_DIM)
+                }
+                "custom" -> {
+                    preferences.remove(KEY_CUSTOM_LEFT)
+                    preferences.remove(KEY_CUSTOM_TOP)
+                    preferences.remove(KEY_CUSTOM_WIDTH)
+                    preferences.remove(KEY_CUSTOM_HEIGHT)
+                    preferences.remove(KEY_CUSTOM_DIM)
                 }
                 else -> {
                     preferences.remove(KEY_CINEMA_LEFT)

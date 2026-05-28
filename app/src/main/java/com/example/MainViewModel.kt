@@ -42,6 +42,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _activeThemePreset = MutableStateFlow(ThemePresets.Cinema)
     val activeThemePreset: StateFlow<ThemePreset> = _activeThemePreset.asStateFlow()
 
+    private val _customBgUri = MutableStateFlow<String?>(null)
+    val customBgUri: StateFlow<String?> = _customBgUri.asStateFlow()
+
     private val _activeAspectRatioId = MutableStateFlow("free")
     val activeAspectRatioId: StateFlow<String> = _activeAspectRatioId.asStateFlow()
 
@@ -75,6 +78,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             preferenceManager.selectedThemeId.collect { id ->
                 _activeThemeId.value = id
                 _activeThemePreset.value = ThemePresets.getById(id)
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.customBackgroundUri.collect { uri ->
+                _customBgUri.value = uri
             }
         }
 
@@ -262,5 +271,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     fun setDebugPanelVisible(visible: Boolean) {
         _showDebugPanel.value = visible
+    }
+
+    fun setCustomBackground(uriString: String?) {
+        viewModelScope.launch {
+            _customBgUri.value = uriString
+            preferenceManager.saveCustomBackgroundUri(uriString)
+        }
+    }
+
+    fun saveCustomBackgroundFromUri(uri: android.net.Uri) {
+        viewModelScope.launch {
+            try {
+                val context = getApplication<Application>()
+                val contentResolver = context.contentResolver
+                val inputStream = contentResolver.openInputStream(uri)
+                if (inputStream != null) {
+                    val targetFile = java.io.File(context.filesDir, "custom_background.jpg")
+                    val outputStream = java.io.FileOutputStream(targetFile)
+                    inputStream.use { input ->
+                        outputStream.use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    val path = targetFile.absolutePath
+                    setCustomBackground(path)
+                    Log.d(TAG, "Successfully copied custom background image to absolute path: $path")
+                } else {
+                    _errorMessage.value = "Unable to open selected image stream"
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error saving custom background", e)
+                _errorMessage.value = "Failed to copy background image: ${e.localizedMessage}"
+            }
+        }
     }
 }
