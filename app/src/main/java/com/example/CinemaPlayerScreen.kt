@@ -84,6 +84,7 @@ fun CinemaPlayerScreen(
 
     // IPTV state collection
     val isIptvModeActive by viewModel.isIptvModeActive.collectAsState()
+    val activeIptvTab by viewModel.activeIptvTab.collectAsState()
     val iptvChannels by viewModel.iptvChannels.collectAsState()
     val epgProgrammes by viewModel.epgProgrammes.collectAsState()
     val currentPlayingChannel by viewModel.currentPlayingChannel.collectAsState()
@@ -123,7 +124,59 @@ fun CinemaPlayerScreen(
                 )
             }
         ) { paddingValues ->
-            if (isExpandedLayout && isIptvModeActive) {
+            val isFullScreenGuide = isIptvModeActive && showDebugPanel && activeIptvTab == 1
+
+            if (isFullScreenGuide) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                ) {
+                    // 1. Full-screen Premium EPG Guide Layout
+                    FullscreenSkyGuide(
+                        viewModel = viewModel,
+                        onCloseGuide = { viewModel.setDebugPanelVisible(false) },
+                        modifier = Modifier.fillMaxSize().padding(paddingValues)
+                    )
+
+                    // 2. Playback Overlay for continuous video viewing in top-right mini player
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                    ) {
+                        CinemaTheaterLayout(
+                            themePreset = activeThemePreset,
+                            screenLayout = screenLayout.copy(dimAlpha = 0f),
+                            playableUri = playableUri,
+                            errorMessage = errorMessage,
+                            headers = requestHeaders,
+                            onPlayTestVideo = { viewModel.playTestVideo() },
+                            onClearPlaySource = { viewModel.setPlayableUri(null) },
+                            onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
+                            isEditMode = isEditMode,
+                            activeAspectRatioId = activeAspectRatioId,
+                            activeResizeMode = activeResizeMode,
+                            onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
+                            isSettingsLoaded = isSettingsLoaded,
+                            isIptvActive = isIptvModeActive,
+                            channels = iptvChannels,
+                            epgList = epgProgrammes,
+                            currentPlayingChannel = currentPlayingChannel,
+                            onPlayChannel = { ch -> viewModel.playIptvChannel(ch) },
+                            onPlayNextChannel = { list -> viewModel.playNextIptvChannel(list) },
+                            onPlayPreviousChannel = { list -> viewModel.playPreviousIptvChannel(list) },
+                            onRecallPreviousChannel = { viewModel.recallPreviousIptvChannel() },
+                            glowIntensitySetting = glowIntensitySetting,
+                            showDebugPanel = showDebugPanel,
+                            onToggleDebug = { viewModel.toggleDebugPanel() },
+                            onSelectTab = { tab -> viewModel.setActiveIptvTab(tab) },
+                            onLayoutChanged = { left, top, width, height ->
+                                viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+            } else if (isExpandedLayout && isIptvModeActive) {
                 // PREMIUM FOLD DUAL-PANE SPLIT-SCREEN LAYOUT
                 Row(
                     modifier = Modifier
@@ -612,11 +665,13 @@ fun CinemaTheaterLayout(
         val containerAreaVal = containerWidthVal * containerHeightVal
 
         // 2. Localized backdrop dim overlay based on settings
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = screenLayout.dimAlpha))
-        )
+        if (screenLayout.dimAlpha > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = screenLayout.dimAlpha))
+            )
+        }
 
         // 3. Compute the adaptive player dimensions based on target area fraction (~0.96f)
         val isMini = isIptvActive && playableUri != null && showDebugPanel

@@ -133,6 +133,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _epgProgrammes = MutableStateFlow<List<EpgProgramme>>(emptyList())
     val epgProgrammes: StateFlow<List<EpgProgramme>> = _epgProgrammes.asStateFlow()
 
+    private val _isEpgLoading = MutableStateFlow(false)
+    val isEpgLoading: StateFlow<Boolean> = _isEpgLoading.asStateFlow()
+
+    private val _epgLoadStatus = MutableStateFlow<String?>(null)
+    val epgLoadStatus: StateFlow<String?> = _epgLoadStatus.asStateFlow()
+
     // Alternative Fallback URLs for easy switching during development:
     // Fallback Sample: "http://clips.vorwaerts-gmbh.de/big_buck_bunny.mp4"
     // Fallback Sample 2 (Sintel): "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4"
@@ -819,6 +825,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isIptvLoading.value = true
             _iptvErrorMessage.value = null
 
+            // Try rendering instantaneous cached EPG first!
+            try {
+                val cached = loadEpgFromLocalCache()
+                if (cached.isNotEmpty()) {
+                    _epgProgrammes.value = cached
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Local EPG cache initial load failed", e)
+            }
+
             try {
                 if (activeXtream != null) {
                     val cats = IptvClient.fetchXtreamCategories(
@@ -858,6 +874,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 IptvClient.fetchUrlStream(xmltvUrl).use { xmlStream ->
                                     val eps = IptvParser.parseXmltv(xmlStream)
                                     _epgProgrammes.value = eps
+                                    saveEpgToLocalCache(eps)
                                 }
                             } catch (epgEx: Exception) {
                                 Log.e(TAG, "XMLTV background EPG load failure", epgEx)
@@ -870,6 +887,115 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _iptvErrorMessage.value = "Stream source error: ${e.localizedMessage}"
             } finally {
                 _isIptvLoading.value = false
+            }
+        }
+    }
+
+    private fun saveEpgToLocalCache(programmes: List<EpgProgramme>) {
+        try {
+            val file = java.io.File(getApplication<Application>().cacheDir, "epg_cache.json")
+            val arr = org.json.JSONArray()
+            for (p in programmes) {
+                val obj = org.json.JSONObject()
+                obj.put("channelId", p.channelId)
+                obj.put("title", p.title)
+                obj.put("startMs", p.startMs)
+                obj.put("endMs", p.endMs)
+                obj.put("description", p.description ?: "")
+                arr.put(obj)
+            }
+            file.writeText(arr.toString())
+            Log.d(TAG, "Saved EPG local cache directory: ${programmes.size} records saved.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed writing EPG to local storage cache", e)
+        }
+    }
+
+    private fun loadEpgFromLocalCache(): List<EpgProgramme> {
+        val list = mutableListOf<EpgProgramme>()
+        try {
+            val file = java.io.File(getApplication<Application>().cacheDir, "epg_cache.json")
+            if (file.exists()) {
+                val json = file.readText()
+                val arr = org.json.JSONArray(json)
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    list.add(
+                        EpgProgramme(
+                            channelId = obj.getString("channelId"),
+                            title = obj.getString("title"),
+                            startMs = obj.getLong("startMs"),
+                            endMs = obj.getLong("endMs"),
+                            description = obj.optString("description").takeIf { it.isNotBlank() }
+                        )
+                    )
+                }
+                Log.d(TAG, "Loaded EPG from local storage cache: ${list.size} records.")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed fetching cached EPG lists", e)
+        }
+        return list
+    }
+
+    fun reloadEpg() {
+        val activeM3u = _m3uPlaylists.value.find { it.isActive }
+        val activeXtream = _xtreamAccounts.value.find { it.isActive }
+        if (activeM3u == null && activeXtream == null) {
+            _epgLoadStatus.value = "No active source to reload/refresh EPG."
+            return
+        }
+
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _isEpgLoading.value = true
+            _epgLoadStatus.value = "Refetching and updating EPG database..."
+            try {
+                var loaded = emptyList<EpgProgramme>()
+                if (activeM3u != null) {
+                    val xmltvUrl = activeM3u.epgUrl
+                    if (!xmltvUrl.isNullOrBlank()) {
+                        IptvClient.fetchUrlStream(xmltvUrl).use { xmlStream ->
+                            loaded = IptvParser.parseXmltv(xmlStream)
+                        }
+                    } else {
+                        throw Exception("Active playlist does not contain an EPG / XMLTV feed.")
+                    }
+                } else if (activeXtream != null) {
+                    val directXmlEpgUrl = "${activeXtream.serverUrl}/xmltv.php?username=${activeXtream.username}&password=${activeXtream.password}"
+                    try {
+                        IptvClient.fetchUrlStream(directXmlEpgUrl).use { xmlStream ->
+                            loaded = IptvParser.parseXmltv(xmlStream)
+                        }
+                    } catch (ex: Exception) {
+                        Log.e(TAG, "Direct XMLTV reload failed, trying short EPG batch", ex)
+                        val combined = mutableListOf<EpgProgramme>()
+                        val chs = _iptvChannels.value.take(50)
+                        for (ch in chs) {
+                            try {
+                                val batch = IptvClient.fetchXtreamShortEpg(
+                                    activeXtream.serverUrl, activeXtream.username, activeXtream.password, ch.id
+                                )
+                                combined.addAll(batch)
+                            } catch (e: Exception) { /* skip */ }
+                        }
+                        loaded = combined
+                    }
+                }
+
+                if (loaded.isNotEmpty()) {
+                    _epgProgrammes.value = loaded
+                    saveEpgToLocalCache(loaded)
+                    _epgLoadStatus.value = "EPG Reloaded successfully! (${loaded.size} shows loaded)"
+                } else {
+                    _epgLoadStatus.value = "Reload completed: No scheduling records recovered."
+                }
+            } catch (e: Exception) {
+                _epgLoadStatus.value = "Failed refreshing EPG: ${e.localizedMessage}"
+            } finally {
+                _isEpgLoading.value = false
+                // Auto reset loading status label in 5 seconds
+                kotlinx.coroutines.delay(5000L)
+                _epgLoadStatus.value = null
             }
         }
     }
