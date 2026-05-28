@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -86,10 +87,12 @@ fun CinemaPlayerScreen(
     val iptvChannels by viewModel.iptvChannels.collectAsState()
     val epgProgrammes by viewModel.epgProgrammes.collectAsState()
     val currentPlayingChannel by viewModel.currentPlayingChannel.collectAsState()
+    val glowIntensitySetting by viewModel.ambientGlow.collectAsState()
 
     val clipboardManager = LocalClipboardManager.current
     val configuration = LocalConfiguration.current
     val customBackgroundUri by viewModel.customBgUri.collectAsState()
+    val activeReminderAlert by viewModel.activeReminderAlert.collectAsState()
 
     // Screen classification: if screenWidthDp >= 600, treat as tablet or unfolded foldable inner display.
     val isExpandedLayout = configuration.screenWidthDp >= 600
@@ -120,136 +123,291 @@ fun CinemaPlayerScreen(
                 )
             }
         ) { paddingValues ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-            ) {
-                // 1. Full-Screen CinemaTheaterLayout rendering behind everything across the complete screen canvas
-                CinemaTheaterLayout(
-                    themePreset = activeThemePreset,
-                    screenLayout = screenLayout,
-                    playableUri = playableUri,
-                    errorMessage = errorMessage,
-                    headers = requestHeaders,
-                    onPlayTestVideo = { viewModel.playTestVideo() },
-                    onClearPlaySource = { viewModel.setPlayableUri(null) },
-                    onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
-                    isEditMode = isEditMode,
-                    activeAspectRatioId = activeAspectRatioId,
-                    activeResizeMode = activeResizeMode,
-                    onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
-                    isSettingsLoaded = isSettingsLoaded,
-                    isIptvActive = isIptvModeActive,
-                    channels = iptvChannels,
-                    epgList = epgProgrammes,
-                    currentPlayingChannel = currentPlayingChannel,
-                    onPlayChannel = { ch -> viewModel.playIptvChannel(ch) },
-                    onPlayNextChannel = { list -> viewModel.playNextIptvChannel(list) },
-                    onPlayPreviousChannel = { list -> viewModel.playPreviousIptvChannel(list) },
-                    showDebugPanel = showDebugPanel,
-                    onToggleDebug = { viewModel.toggleDebugPanel() },
-                    onSelectTab = { tab -> viewModel.setActiveIptvTab(tab) },
-                    onLayoutChanged = { left, top, width, height ->
-                        viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-
-                // 2. Overlaid Interactive Console and Settings Panels
-                if (isExpandedLayout) {
-                    // Right-side floating sidebar layout for tablet/foldables
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(paddingValues)
-                            .padding(horizontal = 24.dp, vertical = 16.dp),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        AnimatedVisibility(
-                            visible = showDebugPanel,
-                            enter = fadeIn(),
-                            exit = fadeOut(),
-                            modifier = Modifier
-                                .width(380.dp)
-                                .fillMaxHeight()
-                        ) {
-                            if (isIptvModeActive) {
-                                Card(
-                                    modifier = Modifier.fillMaxSize(),
-                                    shape = RoundedCornerShape(24.dp),
-                                    colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
-                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
-                                ) {
-                                    IptvDashboard(
-                                        viewModel = viewModel,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                }
-                            } else {
-                                InteractiveConsolePanel(
-                                    viewModel = viewModel,
-                                    activeThemePreset = activeThemePreset,
-                                    screenLayout = screenLayout,
-                                    parsedIntent = parsedIntent,
-                                    playableUri = playableUri,
-                                    errorMessage = errorMessage,
-                                    onCopyLogs = {
-                                        val dump = parsedIntent?.rawDetailsDump ?: "No logs captured yet."
-                                        clipboardManager.setText(AnnotatedString(dump))
-                                    },
-                                    onClosePanel = { viewModel.setDebugPanelVisible(false) }
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    // Bottom drawer panel overlay for standard device portrait
-                    val activeHeightFraction = if (isIptvModeActive) 0.65f else 0.48f
+            if (isExpandedLayout && isIptvModeActive) {
+                // PREMIUM FOLD DUAL-PANE SPLIT-SCREEN LAYOUT
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Left Pane: Cinema Player Container
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(paddingValues)
+                            .weight(if (showDebugPanel) 0.58f else 1f)
+                            .fillMaxHeight()
                     ) {
-                        AnimatedVisibility(
-                            visible = showDebugPanel,
-                            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .fillMaxWidth()
-                                .fillMaxHeight(activeHeightFraction)
-                                .padding(16.dp)
+                        CinemaTheaterLayout(
+                            themePreset = activeThemePreset,
+                            screenLayout = screenLayout,
+                            playableUri = playableUri,
+                            errorMessage = errorMessage,
+                            headers = requestHeaders,
+                            onPlayTestVideo = { viewModel.playTestVideo() },
+                            onClearPlaySource = { viewModel.setPlayableUri(null) },
+                            onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
+                            isEditMode = isEditMode,
+                            activeAspectRatioId = activeAspectRatioId,
+                            activeResizeMode = activeResizeMode,
+                            onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
+                            isSettingsLoaded = isSettingsLoaded,
+                            isIptvActive = isIptvModeActive,
+                            channels = iptvChannels,
+                            epgList = epgProgrammes,
+                            currentPlayingChannel = currentPlayingChannel,
+                            onPlayChannel = { ch -> viewModel.playIptvChannel(ch) },
+                            onPlayNextChannel = { list -> viewModel.playNextIptvChannel(list) },
+                            onPlayPreviousChannel = { list -> viewModel.playPreviousIptvChannel(list) },
+                            onRecallPreviousChannel = { viewModel.recallPreviousIptvChannel() },
+                            glowIntensitySetting = glowIntensitySetting,
+                            showDebugPanel = showDebugPanel,
+                            onToggleDebug = { viewModel.toggleDebugPanel() },
+                            onSelectTab = { tab -> viewModel.setActiveIptvTab(tab) },
+                            onLayoutChanged = { left, top, width, height ->
+                                viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
+                    // Right Pane: Immersive TV Guide/Dashboard side-panel
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = showDebugPanel,
+                        enter = androidx.compose.animation.slideInHorizontally(initialOffsetX = { it }) + androidx.compose.animation.fadeIn(),
+                        exit = androidx.compose.animation.slideOutHorizontally(targetOffsetX = { it }) + androidx.compose.animation.fadeOut(),
+                        modifier = Modifier
+                            .weight(0.42f)
+                            .fillMaxHeight()
+                            .padding(start = 8.dp, end = 16.dp, top = 16.dp, bottom = 16.dp)
+                    ) {
+                        Card(
+                            modifier = Modifier.fillMaxSize(),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
                         ) {
-                            if (isIptvModeActive) {
-                                Card(
-                                    modifier = Modifier.fillMaxSize(),
-                                    shape = RoundedCornerShape(24.dp),
-                                    colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
-                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
-                                ) {
-                                    IptvDashboard(
+                            IptvDashboard(
+                                viewModel = viewModel,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                }
+            } else {
+                // STANDARD OVERLAPPING DRAWER / SIDEBAR LAYOUT (For mobile or non-epg streaming)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                ) {
+                    // 1. Full-Screen CinemaTheaterLayout rendering behind everything across the complete screen canvas
+                    CinemaTheaterLayout(
+                        themePreset = activeThemePreset,
+                        screenLayout = screenLayout,
+                        playableUri = playableUri,
+                        errorMessage = errorMessage,
+                        headers = requestHeaders,
+                        onPlayTestVideo = { viewModel.playTestVideo() },
+                        onClearPlaySource = { viewModel.setPlayableUri(null) },
+                        onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
+                        isEditMode = isEditMode,
+                        activeAspectRatioId = activeAspectRatioId,
+                        activeResizeMode = activeResizeMode,
+                        onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
+                        isSettingsLoaded = isSettingsLoaded,
+                        isIptvActive = isIptvModeActive,
+                        channels = iptvChannels,
+                        epgList = epgProgrammes,
+                        currentPlayingChannel = currentPlayingChannel,
+                        onPlayChannel = { ch -> viewModel.playIptvChannel(ch) },
+                        onPlayNextChannel = { list -> viewModel.playNextIptvChannel(list) },
+                        onPlayPreviousChannel = { list -> viewModel.playPreviousIptvChannel(list) },
+                        onRecallPreviousChannel = { viewModel.recallPreviousIptvChannel() },
+                        glowIntensitySetting = glowIntensitySetting,
+                        showDebugPanel = showDebugPanel,
+                        onToggleDebug = { viewModel.toggleDebugPanel() },
+                        onSelectTab = { tab -> viewModel.setActiveIptvTab(tab) },
+                        onLayoutChanged = { left, top, width, height ->
+                            viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    // 2. Overlaid Interactive Console and Settings Panels
+                    if (isExpandedLayout) {
+                        // Right-side floating sidebar layout for tablet/foldables
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(paddingValues)
+                                .padding(horizontal = 24.dp, vertical = 16.dp),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = showDebugPanel,
+                                enter = androidx.compose.animation.fadeIn(),
+                                exit = androidx.compose.animation.fadeOut(),
+                                modifier = Modifier
+                                    .width(380.dp)
+                                    .fillMaxHeight()
+                            ) {
+                                if (isIptvModeActive) {
+                                    Card(
+                                        modifier = Modifier.fillMaxSize(),
+                                        shape = RoundedCornerShape(24.dp),
+                                        colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+                                    ) {
+                                        IptvDashboard(
+                                            viewModel = viewModel,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
+                                } else {
+                                    InteractiveConsolePanel(
                                         viewModel = viewModel,
-                                        modifier = Modifier.fillMaxSize()
+                                        activeThemePreset = activeThemePreset,
+                                        screenLayout = screenLayout,
+                                        parsedIntent = parsedIntent,
+                                        playableUri = playableUri,
+                                        errorMessage = errorMessage,
+                                        onCopyLogs = {
+                                            val dump = parsedIntent?.rawDetailsDump ?: "No logs captured yet."
+                                            clipboardManager.setText(AnnotatedString(dump))
+                                        },
+                                        onClosePanel = { viewModel.setDebugPanelVisible(false) }
                                     )
                                 }
-                            } else {
-                                InteractiveConsolePanel(
-                                    viewModel = viewModel,
-                                    activeThemePreset = activeThemePreset,
-                                    screenLayout = screenLayout,
-                                    parsedIntent = parsedIntent,
-                                    playableUri = playableUri,
-                                    errorMessage = errorMessage,
-                                    onCopyLogs = {
-                                        val dump = parsedIntent?.rawDetailsDump ?: "No logs captured yet."
-                                        clipboardManager.setText(AnnotatedString(dump))
-                                    },
-                                    onClosePanel = { viewModel.setDebugPanelVisible(false) }
-                                )
+                            }
+                        }
+                    } else {
+                        // Bottom drawer panel overlay for standard device portrait
+                        val activeHeightFraction = if (isIptvModeActive) 0.65f else 0.48f
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(paddingValues)
+                        ) {
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = showDebugPanel,
+                                enter = slideInVertically(initialOffsetY = { it }) + androidx.compose.animation.fadeIn(),
+                                exit = slideOutVertically(targetOffsetY = { it }) + androidx.compose.animation.fadeOut(),
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                                    .fillMaxHeight(activeHeightFraction)
+                                    .padding(16.dp)
+                            ) {
+                                if (isIptvModeActive) {
+                                    Card(
+                                        modifier = Modifier.fillMaxSize(),
+                                        shape = RoundedCornerShape(24.dp),
+                                        colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+                                    ) {
+                                        IptvDashboard(
+                                            viewModel = viewModel,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
+                                } else {
+                                    InteractiveConsolePanel(
+                                        viewModel = viewModel,
+                                        activeThemePreset = activeThemePreset,
+                                        screenLayout = screenLayout,
+                                        parsedIntent = parsedIntent,
+                                        playableUri = playableUri,
+                                        errorMessage = errorMessage,
+                                        onCopyLogs = {
+                                            val dump = parsedIntent?.rawDetailsDump ?: "No logs captured yet."
+                                            clipboardManager.setText(AnnotatedString(dump))
+                                        },
+                                        onClosePanel = { viewModel.setDebugPanelVisible(false) }
+                                    )
+                                }
                             }
                         }
                     }
                 }
+            }
+        }
+
+        // 3. EPG Show Reminder Heads-up prompt overlay dialog
+        if (activeReminderAlert != null) {
+            val alertInfo = activeReminderAlert
+            if (alertInfo != null) {
+                AlertDialog(
+                    onDismissRequest = { viewModel.dismissReminderAlert() },
+                    containerColor = ObsidianSurface,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .border(1.5.dp, IndigoPrimary.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                        .testTag("in_app_reminder_alert_dialog"),
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.NotificationsActive,
+                                contentDescription = "Active Reminder",
+                                tint = IndigoBadgeText,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = "Show Reminder",
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = alertInfo.programTitle,
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Is starting now on channel: ${alertInfo.channelName}",
+                                color = TextSilver,
+                                fontSize = 11.sp
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                viewModel.tuneToReminderChannel(alertInfo)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Tune In", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(
+                                onClick = {
+                                    viewModel.setActiveIptvTab(1) // Tab 1 is TV Guide
+                                    if (!showDebugPanel) {
+                                        viewModel.toggleDebugPanel()
+                                    }
+                                    viewModel.dismissReminderAlert()
+                                }
+                            ) {
+                                Text("Open Guide", color = IndigoBadgeText, fontSize = 11.5.sp)
+                            }
+                            TextButton(
+                                onClick = { viewModel.dismissReminderAlert() }
+                            ) {
+                                Text("Dismiss", color = TextSilver, fontSize = 11.5.sp)
+                            }
+                        }
+                    }
+                )
             }
         }
     }
@@ -390,6 +548,8 @@ fun CinemaTheaterLayout(
     onPlayChannel: (IptvChannel) -> Unit = {},
     onPlayNextChannel: (List<IptvChannel>) -> Unit = {},
     onPlayPreviousChannel: (List<IptvChannel>) -> Unit = {},
+    onRecallPreviousChannel: () -> Unit = {},
+    glowIntensitySetting: AmbientGlowSetting = AmbientGlowSetting.OFF,
     showDebugPanel: Boolean = false,
     onToggleDebug: () -> Unit = {},
     onSelectTab: (Int) -> Unit = {},
@@ -414,6 +574,29 @@ fun CinemaTheaterLayout(
 
     var canvasWidthPx by remember { mutableStateOf(1f) }
     var canvasHeightPx by remember { mutableStateOf(1f) }
+
+    // Gentle slow pulse for ambient backlight glow (3.5s cycle)
+    val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition()
+    val pulseAnimation by infiniteTransition.animateFloat(
+        initialValue = 0.88f,
+        targetValue = 1.12f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(durationMillis = 3500, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "ambient_glow_pulse"
+    )
+
+    // Slow organic color hue shifting for ambient mode (12s cycle)
+    val shiftAnimation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(durationMillis = 12000, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Restart
+        ),
+        label = "ambient_hue_shift"
+    )
 
     BoxWithConstraints(
         modifier = modifier
@@ -666,31 +849,43 @@ fun CinemaTheaterLayout(
                 .size(width = playerWidth, height = playerHeight)
                 .testTag("video_screen_container")
                 .drawBehind {
-                    val glowRadius = themePreset.glowRadiusDp.dp.toPx()
-                    val glowCol = themePreset.glowColor
-                    val shadowFactor = themePreset.shadowIntensity
-                    
-                    // Immersive drop-glow behind the video stream
-                    if (glowRadius > 0f) {
-                        val passes = 4
-                        for (i in 1..passes) {
-                            val scale = 1.0f + (i * 0.015f * (glowRadius / 20f))
-                            val alphaFactor = (passes - i + 1).toFloat() / passes
-                            drawRoundRect(
-                                color = glowCol.copy(alpha = glowCol.alpha * alphaFactor * shadowFactor * 0.65f),
-                                topLeft = androidx.compose.ui.geometry.Offset(
-                                    -(size.width * (scale - 1f) / 2f),
-                                    -(size.height * (scale - 1f) / 2f)
-                                ),
-                                size = androidx.compose.ui.geometry.Size(
-                                    size.width * scale,
-                                    size.height * scale
-                                ),
-                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(
-                                    themePreset.cornerRadiusDp.dp.toPx() * scale,
-                                    themePreset.cornerRadiusDp.dp.toPx() * scale
+                    if (glowIntensitySetting != AmbientGlowSetting.OFF) {
+                        val isMedium = glowIntensitySetting == AmbientGlowSetting.MEDIUM
+                        val baseGlow = themePreset.glowRadiusDp.dp.toPx()
+                        val glowRadius = if (isMedium) baseGlow * 1.6f else baseGlow
+
+                        val baseColor = themePreset.glowColor
+                        val accentColor = themePreset.primaryColor
+                        val blendedColor = if (isMedium) {
+                            val blendFactor = (pulseAnimation - 0.88f) / (1.12f - 0.88f)
+                            androidx.compose.ui.graphics.lerp(baseColor, accentColor, blendFactor.coerceIn(0f, 1f))
+                        } else {
+                            baseColor
+                        }
+
+                        val shadowFactor = themePreset.shadowIntensity * (if (isMedium) 1.15f else 0.82f) * pulseAnimation
+
+                        if (glowRadius > 0f) {
+                            val passes = if (isMedium) 5 else 4
+                            for (i in 1..passes) {
+                                val scale = 1.0f + (i * 0.016f * (glowRadius / 20f)) * (if (isMedium) 1.2f else 1.0f)
+                                val alphaFactor = (passes - i + 1).toFloat() / passes
+                                drawRoundRect(
+                                    color = blendedColor.copy(alpha = blendedColor.alpha * alphaFactor * shadowFactor * 0.55f),
+                                    topLeft = androidx.compose.ui.geometry.Offset(
+                                        -(size.width * (scale - 1f) / 2f),
+                                        -(size.height * (scale - 1f) / 2f)
+                                    ),
+                                    size = androidx.compose.ui.geometry.Size(
+                                        size.width * scale,
+                                        size.height * scale
+                                    ),
+                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                                        themePreset.cornerRadiusDp.dp.toPx() * scale,
+                                        themePreset.cornerRadiusDp.dp.toPx() * scale
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
                 }
@@ -824,6 +1019,7 @@ fun CinemaTheaterLayout(
                                 onPlayChannel = onPlayChannel,
                                 onPlayNextChannel = onPlayNextChannel,
                                 onPlayPreviousChannel = onPlayPreviousChannel,
+                                onRecallPreviousChannel = onRecallPreviousChannel,
                                 onToggleDebug = onToggleDebug,
                                 onSelectTab = onSelectTab,
                                 showDebugPanel = showDebugPanel,
@@ -1010,6 +1206,7 @@ fun LiveInfoOverlay(
     onPlayChannel: (IptvChannel) -> Unit,
     onPlayNextChannel: (List<IptvChannel>) -> Unit,
     onPlayPreviousChannel: (List<IptvChannel>) -> Unit,
+    onRecallPreviousChannel: () -> Unit,
     onToggleDebug: () -> Unit,
     onSelectTab: (Int) -> Unit,
     showDebugPanel: Boolean,
@@ -1277,6 +1474,23 @@ fun LiveInfoOverlay(
                             imageVector = Icons.Default.SkipPrevious,
                             contentDescription = "Previous channel",
                             tint = Color.White
+                        )
+                    }
+
+                    IconButton(
+                        onClick = {
+                            onRecallPreviousChannel()
+                            onInteraction()
+                        },
+                        modifier = Modifier
+                            .size(44.dp)
+                            .testTag("recall_channel_overlay_button"),
+                        colors = IconButtonDefaults.iconButtonColors(containerColor = IndigoPrimary.copy(alpha = 0.15f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = "Recall last channel",
+                            tint = IndigoPrimary
                         )
                     }
 
@@ -2198,7 +2412,210 @@ fun InteractiveConsolePanel(
                             )
                         }
 
+                        // ==========================================
+                        // SAVED LAYOUT PRESETS
+                        // ==========================================
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "SAVED LAYOUT PRESETS",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.2.sp,
+                                    color = Color.White.copy(alpha = 0.5f)
+                                )
+                            )
+
+                            val presetsList by viewModel.presets.collectAsState()
+
+                            androidx.compose.foundation.lazy.LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                items(presetsList.size) { index ->
+                                    val preset = presetsList[index]
+                                    var showRenameDialog by remember { mutableStateOf(false) }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color.White.copy(alpha = 0.04f))
+                                            .border(
+                                                1.dp,
+                                                if (preset.isBuiltIn) IndigoPrimary.copy(alpha = 0.3f) else Color.White.copy(alpha = 0.12f),
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                            .clickable { viewModel.applyLayoutPreset(preset) }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (preset.isBuiltIn) Icons.Default.DashboardCustomize else Icons.Default.Bookmark,
+                                                contentDescription = null,
+                                                tint = if (preset.isBuiltIn) IndigoBadgeText else activeThemePreset.primaryColor,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Text(
+                                                text = preset.name,
+                                                color = TextSilver,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            if (!preset.isBuiltIn) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Edit,
+                                                    contentDescription = "Rename",
+                                                    tint = TextSilver.copy(alpha = 0.6f),
+                                                    modifier = Modifier
+                                                        .size(12.dp)
+                                                        .clickable { showRenameDialog = true }
+                                                )
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "Delete",
+                                                    tint = CoralError.copy(alpha = 0.8f),
+                                                    modifier = Modifier
+                                                        .size(12.dp)
+                                                        .clickable { viewModel.deletePreset(preset.id) }
+                                                )
+                                            }
+                                        }
+
+                                        if (showRenameDialog) {
+                                            var tempName by remember { mutableStateOf(preset.name) }
+                                            AlertDialog(
+                                                onDismissRequest = { showRenameDialog = false },
+                                                title = { Text("Rename Preset", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold) },
+                                                text = {
+                                                    OutlinedTextField(
+                                                        value = tempName,
+                                                        onValueChange = { tempName = it },
+                                                        colors = OutlinedTextFieldDefaults.colors(
+                                                            focusedTextColor = Color.White,
+                                                            unfocusedTextColor = Color.White,
+                                                            focusedBorderColor = IndigoPrimary,
+                                                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
+                                                        ),
+                                                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                                                    )
+                                                },
+                                                confirmButton = {
+                                                    TextButton(onClick = {
+                                                        viewModel.renamePreset(preset.id, tempName)
+                                                        showRenameDialog = false
+                                                    }) { Text("Rename", color = IndigoPrimary) }
+                                                },
+                                                dismissButton = {
+                                                    TextButton(onClick = { showRenameDialog = false }) { Text("Cancel", color = TextSilver) }
+                                                },
+                                                containerColor = ObsidianSurface
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            var customPresetName by remember { mutableStateOf("") }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(36.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = customPresetName,
+                                    onValueChange = { customPresetName = it },
+                                    placeholder = { Text("Custom preset name...", fontSize = 10.5.sp, color = TextMuted) },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White,
+                                        focusedBorderColor = activeThemePreset.primaryColor,
+                                        unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+                                        focusedContainerColor = Color.Black.copy(alpha = 0.2f),
+                                        unfocusedContainerColor = Color.Black.copy(alpha = 0.2f)
+                                    ),
+                                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp),
+                                    maxLines = 1,
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+
+                                Button(
+                                    onClick = {
+                                        if (customPresetName.isNotBlank()) {
+                                            viewModel.saveCurrentLayoutAsPreset(customPresetName)
+                                            customPresetName = ""
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = activeThemePreset.primaryColor),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxHeight(),
+                                    contentPadding = PaddingValues(horizontal = 12.dp)
+                                ) {
+                                    Icon(imageVector = Icons.Default.Save, contentDescription = null, modifier = Modifier.size(13.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Save Active", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
                         Divider(color = Color.White.copy(alpha = 0.04f))
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        // ==========================================
+                        // AMBIENT BACKLIGHTING GLOW
+                        // ==========================================
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "AMBIENT BACKLIGHTING GLOW",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.2.sp,
+                                    color = Color.White.copy(alpha = 0.5f)
+                                )
+                            )
+
+                            val glowIntensity by viewModel.ambientGlow.collectAsState()
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                AmbientGlowSetting.values().forEach { option ->
+                                    val isSelected = glowIntensity == option
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isSelected) activeThemePreset.primaryColor.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.02f))
+                                            .border(
+                                                1.dp,
+                                                if (isSelected) activeThemePreset.primaryColor else Color.White.copy(alpha = 0.05f),
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                            .clickable { viewModel.setAmbientGlow(option) }
+                                            .padding(vertical = 8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = option.name,
+                                            color = if (isSelected) Color.White else TextSilver,
+                                            fontSize = 10.5.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Divider(color = Color.White.copy(alpha = 0.04f))
+                        Spacer(modifier = Modifier.height(4.dp))
 
                         // Reset Controls
                         Row(

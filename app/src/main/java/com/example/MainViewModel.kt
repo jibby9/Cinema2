@@ -14,6 +14,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val preferenceManager = PlayerPreferenceManager(application)
 
+    // ==========================================
+    // PREMIUM FEATURES STATES
+    // ==========================================
+    private val premiumStore = PremiumFeaturesStore(application)
+
+    private val _presets = MutableStateFlow<List<LayoutPreset>>(emptyList())
+    val presets: StateFlow<List<LayoutPreset>> = _presets.asStateFlow()
+
+    private val _ambientGlow = MutableStateFlow(AmbientGlowSetting.SUBTLE)
+    val ambientGlow: StateFlow<AmbientGlowSetting> = _ambientGlow.asStateFlow()
+
+    private val _reminders = MutableStateFlow<List<IptvReminder>>(emptyList())
+    val reminders: StateFlow<List<IptvReminder>> = _reminders.asStateFlow()
+
+    private val _activeReminderAlert = MutableStateFlow<IptvReminder?>(null)
+    val activeReminderAlert: StateFlow<IptvReminder?> = _activeReminderAlert.asStateFlow()
+
+    private val _recentChannels = MutableStateFlow<List<IptvChannel>>(emptyList())
+    val recentChannels: StateFlow<List<IptvChannel>> = _recentChannels.asStateFlow()
+
     private val _parsedIntent = MutableStateFlow<ParsedIntentInfo?>(null)
     val parsedIntent: StateFlow<ParsedIntentInfo?> = _parsedIntent.asStateFlow()
 
@@ -191,6 +211,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             preferenceManager.lastChannelId.collect { id ->
                 _lastChannelId.value = id
+            }
+        }
+
+        // ==========================================
+        // INITIALIZE PREMIUM FEATURES
+        // ==========================================
+        _presets.value = LayoutPreset.BuiltInPresets + premiumStore.loadCustomPresets()
+        _ambientGlow.value = premiumStore.getAmbientGlow()
+        _reminders.value = premiumStore.loadReminders()
+
+        startRemindersPolling()
+
+        viewModelScope.launch {
+            val lastPresetId = premiumStore.getLastPresetId()
+            if (lastPresetId != null) {
+                val found = _presets.value.find { it.id == lastPresetId }
+                if (found != null) {
+                    kotlinx.coroutines.delay(800)
+                    applyLayoutPreset(found)
+                }
             }
         }
     }
@@ -411,6 +451,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playIptvChannel(channel: IptvChannel) {
+        val current = _currentPlayingChannel.value
+        if (current != null && current.id != channel.id) {
+            val hist = _recentChannels.value.toMutableList()
+            hist.removeAll { it.id == current.id }
+            hist.add(0, current)
+            if (hist.size > 10) {
+                hist.removeAt(hist.lastIndex)
+            }
+            _recentChannels.value = hist
+        }
+
         _currentPlayingChannel.value = channel
         setPlayableUri(channel.streamUrl)
         viewModelScope.launch {
@@ -420,6 +471,170 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val activeXtream = _xtreamAccounts.value.find { it.isActive }
         if (activeXtream != null) {
             fetchXtreamEpgForChannel(channel.id)
+        }
+    }
+
+    fun recallPreviousIptvChannel() {
+        val previous = _recentChannels.value.firstOrNull()
+        if (previous != null) {
+            playIptvChannel(previous)
+        }
+    }
+
+    // ==========================================
+    // PREMIUM FEATURES IMPLEMENTATIONS
+    // ==========================================
+
+    fun setAmbientGlow(setting: AmbientGlowSetting) {
+        _ambientGlow.value = setting
+        premiumStore.saveAmbientGlow(setting)
+    }
+
+    fun applyLayoutPreset(preset: LayoutPreset) {
+        viewModelScope.launch {
+            Log.d(TAG, "Applying layout preset: ${preset.name}")
+            val settings = ScreenLayoutSettings(
+                left = preset.left,
+                top = preset.top,
+                width = preset.width,
+                height = preset.height,
+                dimAlpha = preset.dimAlpha,
+                subtitleOffset = 0.5f
+            )
+            _screenLayout.value = settings
+            
+            // Sync with Theme and datastore
+            preferenceManager.saveLayoutSettings(preset.themeId, settings)
+            preferenceManager.saveSelectedTheme(preset.themeId)
+            preferenceManager.saveSelectedResizeMode(preset.displayMode)
+            
+            // Store last as tracking
+            premiumStore.saveLastPresetId(preset.id)
+        }
+    }
+
+    fun saveCurrentLayoutAsPreset(name: String) {
+        viewModelScope.launch {
+            val currentLayout = _screenLayout.value
+            val currentTheme = _activeThemeId.value
+            val currentMode = _activeResizeMode.value
+            
+            val newPreset = LayoutPreset(
+                id = "custom_" + System.currentTimeMillis(),
+                name = name,
+                left = currentLayout.left,
+                top = currentLayout.top,
+                width = currentLayout.width,
+                height = currentLayout.height,
+                dimAlpha = currentLayout.dimAlpha,
+                displayMode = currentMode,
+                themeId = currentTheme,
+                isBuiltIn = false
+            )
+            
+            val customOnly = premiumStore.loadCustomPresets().toMutableList()
+            customOnly.removeIf { it.name.lowercase() == name.lowercase() }
+            customOnly.add(newPreset)
+            premiumStore.saveCustomPresets(customOnly)
+            
+            _presets.value = LayoutPreset.BuiltInPresets + customOnly
+            premiumStore.saveLastPresetId(newPreset.id)
+            Log.d(TAG, "Saved custom layout preset: $name")
+        }
+    }
+
+    fun renamePreset(id: String, newName: String) {
+        viewModelScope.launch {
+            val customOnly = premiumStore.loadCustomPresets().map {
+                if (it.id == id) it.copy(name = newName) else it
+            }
+            premiumStore.saveCustomPresets(customOnly)
+            _presets.value = LayoutPreset.BuiltInPresets + customOnly
+        }
+    }
+
+    fun deletePreset(id: String) {
+        viewModelScope.launch {
+            val customOnly = premiumStore.loadCustomPresets().filter { it.id != id }
+            premiumStore.saveCustomPresets(customOnly)
+            _presets.value = LayoutPreset.BuiltInPresets + customOnly
+            
+            if (premiumStore.getLastPresetId() == id) {
+                premiumStore.saveLastPresetId(null)
+            }
+        }
+    }
+
+    fun addReminder(channel: IptvChannel, prog: EpgProgramme, leadTimeMin: Int) {
+        viewModelScope.launch {
+            val newReminder = IptvReminder(
+                channelId = channel.id,
+                channelName = channel.name,
+                channelStreamUrl = channel.streamUrl,
+                programTitle = prog.title,
+                programStartMs = prog.startMs,
+                programEndMs = prog.endMs,
+                leadTimeMinutes = leadTimeMin
+            )
+            val currentList = _reminders.value.toMutableList()
+            currentList.removeAll { it.channelId == channel.id && it.programStartMs == prog.startMs }
+            currentList.add(newReminder)
+            
+            premiumStore.saveReminders(currentList)
+            _reminders.value = currentList
+            Log.d(TAG, "Scheduled reminder: ${prog.title}")
+        }
+    }
+
+    fun removeReminder(id: String) {
+        viewModelScope.launch {
+            val currentList = _reminders.value.filter { it.id != id }
+            premiumStore.saveReminders(currentList)
+            _reminders.value = currentList
+        }
+    }
+
+    fun dismissReminderAlert() {
+        _activeReminderAlert.value = null
+    }
+
+    fun tuneToReminderChannel(reminder: IptvReminder) {
+        viewModelScope.launch {
+            val channel = _iptvChannels.value.find { it.id == reminder.channelId }
+            if (channel != null) {
+                playIptvChannel(channel)
+            } else {
+                val lightChannel = IptvChannel(
+                    id = reminder.channelId,
+                    name = reminder.channelName,
+                    streamUrl = reminder.channelStreamUrl
+                )
+                playIptvChannel(lightChannel)
+            }
+            _activeReminderAlert.value = null
+        }
+    }
+
+    private fun startRemindersPolling() {
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(10000) // check every 10 seconds
+                val now = System.currentTimeMillis()
+                val activeList = _reminders.value
+                val triggered = activeList.find { now >= it.triggerTimeMs && now < it.programEndMs }
+                if (triggered != null) {
+                    _activeReminderAlert.value = triggered
+                    val nonTriggered = activeList.filter { it.id != triggered.id }
+                    premiumStore.saveReminders(nonTriggered)
+                    _reminders.value = nonTriggered
+                } else {
+                    val nonExpired = activeList.filter { now < it.programEndMs }
+                    if (nonExpired.size != activeList.size) {
+                        premiumStore.saveReminders(nonExpired)
+                        _reminders.value = nonExpired
+                    }
+                }
+            }
         }
     }
 

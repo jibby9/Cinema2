@@ -920,7 +920,8 @@ fun IptvGuideTab(
             },
             onFavoriteToggle = {
                 viewModel.toggleFavoriteChannel(channel.id)
-            }
+            },
+            viewModel = viewModel
         )
     }
 }
@@ -1037,16 +1038,23 @@ fun ProgrammeDetailsDialog(
     onDismiss: () -> Unit,
     onTuneClick: () -> Unit,
     onFavoriteToggle: () -> Unit,
+    viewModel: MainViewModel,
     modifier: Modifier = Modifier
 ) {
     val now = System.currentTimeMillis()
     val isLive = now in programme.startMs..programme.endMs
+    val isFuture = programme.startMs > now
 
     // Formatting times
     val startLabel = remember(programme.startMs) { formatShortTime(programme.startMs) }
     val endLabel = remember(programme.endMs) { formatShortTime(programme.endMs) }
     val durationMin = remember(programme.startMs, programme.endMs) {
         ((programme.endMs - programme.startMs) / 60000L).toInt()
+    }
+
+    val reminders by viewModel.reminders.collectAsState()
+    val existingReminder = remember(reminders, programme) {
+        reminders.find { it.channelId == channel.id && it.programStartMs == programme.startMs }
     }
 
     AlertDialog(
@@ -1184,9 +1192,86 @@ fun ProgrammeDetailsDialog(
                     color = TextSilver.copy(alpha = 0.7f),
                     fontSize = 11.5.sp,
                     lineHeight = 15.sp,
-                    maxLines = 6,
+                    maxLines = 4,
                     overflow = TextOverflow.Ellipsis
                 )
+
+                // Reminders Section for Future items
+                if (isFuture) {
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                    if (existingReminder != null) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = IndigoPrimary.copy(alpha = 0.12f)),
+                            border = BorderStroke(1.dp, IndigoPrimary.copy(alpha = 0.3f)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.NotificationsActive,
+                                        contentDescription = null,
+                                        tint = IndigoPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = if (existingReminder.leadTimeMinutes == 0) "Reminder scheduled" else "${existingReminder.leadTimeMinutes} min lead-time set",
+                                        color = TextSilver,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                                TextButton(
+                                    onClick = { viewModel.removeReminder(existingReminder.id) },
+                                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Red.copy(alpha = 0.8f)),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Remove", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "🔔 Set Live Show Reminder",
+                                color = TextSilver,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                val optionList = listOf(0 to "At Start", 5 to "5m prior", 10 to "10m prior")
+                                optionList.forEach { (lead, textVal) ->
+                                    Button(
+                                        onClick = { viewModel.addReminder(channel, programme, lead) },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color.White.copy(alpha = 0.05f),
+                                            contentColor = TextSilver
+                                        ),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(30.dp)
+                                    ) {
+                                        Text(textVal, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
