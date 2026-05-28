@@ -127,22 +127,10 @@ fun CinemaPlayerScreen(
             val isFullScreenGuide = isIptvModeActive && showDebugPanel && activeIptvTab == 1
 
             if (isFullScreenGuide) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                ) {
-                    // 1. Full-screen Premium EPG Guide Layout
-                    FullscreenSkyGuide(
-                        viewModel = viewModel,
-                        onCloseGuide = { viewModel.setDebugPanelVisible(false) },
-                        modifier = Modifier.fillMaxSize().padding(paddingValues)
-                    )
-
-                    // 2. Playback Overlay for continuous video viewing in top-right mini player
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                    ) {
+                FullscreenSkyGuide(
+                    viewModel = viewModel,
+                    onCloseGuide = { viewModel.setDebugPanelVisible(false) },
+                    mediaPlayerContent = {
                         CinemaTheaterLayout(
                             themePreset = activeThemePreset,
                             screenLayout = screenLayout.copy(dimAlpha = 0f),
@@ -152,7 +140,7 @@ fun CinemaPlayerScreen(
                             onPlayTestVideo = { viewModel.playTestVideo() },
                             onClearPlaySource = { viewModel.setPlayableUri(null) },
                             onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
-                            isEditMode = isEditMode,
+                            isEditMode = false,
                             activeAspectRatioId = activeAspectRatioId,
                             activeResizeMode = activeResizeMode,
                             onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
@@ -165,17 +153,17 @@ fun CinemaPlayerScreen(
                             onPlayNextChannel = { list -> viewModel.playNextIptvChannel(list) },
                             onPlayPreviousChannel = { list -> viewModel.playPreviousIptvChannel(list) },
                             onRecallPreviousChannel = { viewModel.recallPreviousIptvChannel() },
-                            glowIntensitySetting = glowIntensitySetting,
+                            glowIntensitySetting = AmbientGlowSetting.OFF,
                             showDebugPanel = showDebugPanel,
                             onToggleDebug = { viewModel.toggleDebugPanel() },
                             onSelectTab = { tab -> viewModel.setActiveIptvTab(tab) },
-                            onLayoutChanged = { left, top, width, height ->
-                                viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
-                            },
+                            onLayoutChanged = { _, _, _, _ -> },
+                            isEpgGuideMode = true,
                             modifier = Modifier.fillMaxSize()
                         )
-                    }
-                }
+                    },
+                    modifier = Modifier.fillMaxSize().padding(paddingValues)
+                )
             } else if (isExpandedLayout && isIptvModeActive) {
                 // PREMIUM FOLD DUAL-PANE SPLIT-SCREEN LAYOUT
                 Row(
@@ -607,6 +595,7 @@ fun CinemaTheaterLayout(
     onToggleDebug: () -> Unit = {},
     onSelectTab: (Int) -> Unit = {},
     onLayoutChanged: (left: Float, top: Float, width: Float, height: Float) -> Unit = { _, _, _, _ -> },
+    isEpgGuideMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     // 1. Live state tracking the detected aspect ratio of the active stream
@@ -665,7 +654,7 @@ fun CinemaTheaterLayout(
         val containerAreaVal = containerWidthVal * containerHeightVal
 
         // 2. Localized backdrop dim overlay based on settings
-        if (screenLayout.dimAlpha > 0f) {
+        if (!isEpgGuideMode && screenLayout.dimAlpha > 0f) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -674,7 +663,7 @@ fun CinemaTheaterLayout(
         }
 
         // 3. Compute the adaptive player dimensions based on target area fraction (~0.96f)
-        val isMini = isIptvActive && playableUri != null && showDebugPanel
+        val isMini = !isEpgGuideMode && isIptvActive && playableUri != null && showDebugPanel
 
         val aspectR = detectedRatio.coerceIn(0.3f, 3.5f) // sensible min/max bounds
         val miniWidthDp = if (maxWidth >= 600.dp) 240.dp else 180.dp
@@ -683,7 +672,10 @@ fun CinemaTheaterLayout(
         var calculatedWidth = 0f
         var calculatedHeight = 0f
 
-        if (isMini) {
+        if (isEpgGuideMode) {
+            calculatedWidth = containerWidthVal
+            calculatedHeight = containerHeightVal
+        } else if (isMini) {
             calculatedWidth = miniWidthDp.value
             calculatedHeight = miniHeightDp.value
         } else {
@@ -784,7 +776,9 @@ fun CinemaTheaterLayout(
         }
 
         // Compute fractions for offset
-        val finalLeftFraction = if (isMini) {
+        val finalLeftFraction = if (isEpgGuideMode) {
+            0f
+        } else if (isMini) {
             if (isMiniDragging) {
                 ((targetCornerLeftFrac * canvasWidthPx + miniDragOffsetX).coerceIn(0f, canvasWidthPx - miniWidthPx) / canvasWidthPx)
             } else {
@@ -794,7 +788,9 @@ fun CinemaTheaterLayout(
             activeLeftFraction
         }
 
-        val finalTopFraction = if (isMini) {
+        val finalTopFraction = if (isEpgGuideMode) {
+            0f
+        } else if (isMini) {
             if (isMiniDragging) {
                 ((targetCornerTopFrac * canvasHeightPx + miniDragOffsetY).coerceIn(0f, canvasHeightPx - miniHeightPx) / canvasHeightPx)
             } else {
@@ -807,7 +803,7 @@ fun CinemaTheaterLayout(
         val cornerShape = RoundedCornerShape(themePreset.cornerRadiusDp.dp)
 
         // 4. Draggable drag modification (smooth relative tracking and bounds clamping)
-        val dragModifier = if (isEditMode) {
+        val dragModifier = if (isEditMode && !isEpgGuideMode) {
             Modifier.pointerInput(containerWidthVal, containerHeightVal, calculatedWidth, calculatedHeight) {
                 detectDragGestures(
                     onDragStart = {
@@ -846,7 +842,7 @@ fun CinemaTheaterLayout(
             Modifier
         }
 
-        val miniDragModifier = if (isMini) {
+        val miniDragModifier = if (isMini && !isEpgGuideMode) {
             Modifier.pointerInput(canvasWidthPx, canvasHeightPx, miniWidthPx, miniHeightPx) {
                 detectDragGestures(
                     onDragStart = {

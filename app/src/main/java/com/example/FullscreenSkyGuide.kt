@@ -44,6 +44,7 @@ private val TextMuted = Color(0xFF64748B)
 fun FullscreenSkyGuide(
     viewModel: MainViewModel,
     onCloseGuide: () -> Unit,
+    mediaPlayerContent: @Composable () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val epgList by viewModel.epgProgrammes.collectAsState()
@@ -54,6 +55,7 @@ fun FullscreenSkyGuide(
     val currentPlayingChannel by viewModel.currentPlayingChannel.collectAsState()
     val isEpgLoading by viewModel.isEpgLoading.collectAsState()
     val epgLoadStatus by viewModel.epgLoadStatus.collectAsState()
+    val playableUri by viewModel.playableUri.collectAsState()
 
     var activeDateOffset by remember { mutableStateOf(0) } // 0: Today, 1: Tomorrow, 2: Day+2, etc.
     var showSearchField by remember { mutableStateOf(false) }
@@ -164,56 +166,117 @@ fun FullscreenSkyGuide(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(ObsidianSurface)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
+            // LEFT COLUMN: Header Brand Info & Category Selection
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // TV Icon / Receiver Brand
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(IndigoPrimary),
-                    contentAlignment = Alignment.Center
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(Icons.Default.Tv, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    // TV Icon / Receiver Brand
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(IndigoPrimary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Tv, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+
+                    Column {
+                        Text(
+                            text = "SKY Receiver EPG",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        )
+                        Text(
+                            text = "Set-top-box Live TV Guide",
+                            color = TextMuted,
+                            fontSize = 11.sp
+                        )
+                    }
                 }
 
-                Column {
-                    Text(
-                        text = "SKY Receiver EPG",
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
-                    )
-                    Text(
-                        text = "Set-top-box Live TV Guide",
-                        color = TextMuted,
-                        fontSize = 11.sp
-                    )
-                }
-            }
+                // Category selector dropdown
+                var isCategoryDropdownExpanded by remember { mutableStateOf(false) }
 
-            // Interactive Info Status & Reload Feedback
-            Box(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
+                Box(modifier = Modifier.wrapContentSize()) {
+                    Button(
+                        onClick = { isCategoryDropdownExpanded = true },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White.copy(alpha = 0.08f),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                        modifier = Modifier.height(36.dp).testTag("category_dropdown_btn")
+                    ) {
+                        Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = selectedCategory?.name ?: "All Channels",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(14.dp))
+                    }
+
+                    DropdownMenu(
+                        expanded = isCategoryDropdownExpanded,
+                        onDismissRequest = { isCategoryDropdownExpanded = false },
+                        modifier = Modifier
+                            .background(ObsidianSurface)
+                            .border(1.dp, Color.White.copy(alpha = 0.1f))
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("All Channels", color = Color.White, fontSize = 13.sp) },
+                            onClick = {
+                                viewModel.selectIptvCategory(null)
+                                isCategoryDropdownExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("⭐ Favorites", color = Color.White, fontSize = 13.sp) },
+                            onClick = {
+                                viewModel.selectIptvCategory(IptvCategory("favorites_filter", "⭐ Favorites"))
+                                isCategoryDropdownExpanded = false
+                            }
+                        )
+                        categories.forEach { cat ->
+                            DropdownMenuItem(
+                                text = { Text(cat.name, color = Color.White, fontSize = 13.sp) },
+                                onClick = {
+                                    viewModel.selectIptvCategory(cat)
+                                    isCategoryDropdownExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // EPG Loading Feedback on status bar
                 androidx.compose.animation.AnimatedVisibility(
                     visible = epgLoadStatus != null || isEpgLoading,
                     enter = fadeIn() + slideInVertically(),
                     exit = fadeOut() + slideOutVertically()
                 ) {
+                    val isFailed = epgLoadStatus?.contains("failed", ignoreCase = true) == true
                     Card(
                         colors = CardDefaults.cardColors(
-                            containerColor = if (epgLoadStatus?.contains("failed", ignoreCase = true) == true)
-                                Color(0xFF4A1515) else IndigoSecondary.copy(alpha = 0.15f)
+                            containerColor = if (isFailed) Color(0xFF4A1515) else IndigoSecondary.copy(alpha = 0.15f)
                         ),
-                        border = BorderStroke(1.dp, if (epgLoadStatus?.contains("failed", ignoreCase = true) == true) Color.Red.copy(0.3f) else IndigoPrimary.copy(alpha = 0.3f)),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.align(Alignment.CenterStart)
+                        border = BorderStroke(1.dp, if (isFailed) Color.Red.copy(0.3f) else IndigoPrimary.copy(alpha = 0.3f)),
+                        shape = RoundedCornerShape(8.dp)
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -230,57 +293,110 @@ fun FullscreenSkyGuide(
                                     modifier = Modifier.size(14.dp)
                                 )
                             }
-                            Text(epgLoadStatus ?: "Updating EPG Listings...", color = TextSilver, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(epgLoadStatus ?: "Updating...", color = TextSilver, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
 
-            // Realtime STB Digital Clock & Close Button
+            // RIGHT COLUMN: Live TV Mini Player AND Clock / Exit
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Clock widget
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.6f)),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
-                    shape = RoundedCornerShape(6.dp),
-                    modifier = Modifier.padding(end = 4.dp)
-                ) {
-                    Text(
-                        text = liveTimeText,
-                        color = Color.Green,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
+                // Integrated compact 16:9 mini-player (ONLY visible if stream is active)
+                if (!playableUri.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .width(180.dp)
+                            .height(101.dp) // Perfect 16:9 aspect ratio helper
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black)
+                            .border(1.5.dp, IndigoPrimary.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                            .testTag("guide_mini_player_box")
+                    ) {
+                        // Render the media player content Lambda
+                        mediaPlayerContent()
+                        
+                        // Small indicator overlay
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(6.dp)
+                                .background(Color.Red, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            Text("LIVE FEED", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    // Stylish receiver logo placeholder if no channel is currently tuned
+                    Box(
+                        modifier = Modifier
+                            .width(180.dp)
+                            .height(101.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black.copy(0.4f))
+                            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.Tv, contentDescription = null, tint = TextMuted, modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.height(4.dp))
+                            Text("No Active Stream", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
 
-                // Manual Reload Button
-                IconButton(
-                    onClick = { viewModel.reloadEpg() },
-                    modifier = Modifier.size(34.dp).testTag("reload_epg_btn"),
-                    colors = IconButtonDefaults.iconButtonColors(containerColor = Color.White.copy(alpha = 0.04f))
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Reload EPG", tint = Color.White, modifier = Modifier.size(18.dp))
-                }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Real-time STB style Green clock
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.6f)),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = liveTimeText,
+                                color = Color.Green,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
 
-                // Close Guide Button
-                Button(
-                    onClick = onCloseGuide,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.White.copy(alpha = 0.08f),
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    modifier = Modifier.height(34.dp)
-                ) {
-                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Watch TV", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        // Manual Reload button
+                        IconButton(
+                            onClick = { viewModel.reloadEpg() },
+                            modifier = Modifier.size(32.dp).testTag("reload_epg_btn"),
+                            colors = IconButtonDefaults.iconButtonColors(containerColor = Color.White.copy(alpha = 0.04f))
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Reload EPG", tint = Color.White, modifier = Modifier.size(16.dp))
+                        }
+                    }
+
+                    // Return to Live full screen tv
+                    Button(
+                        onClick = onCloseGuide,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = IndigoPrimary,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                        modifier = Modifier.height(34.dp).testTag("close_guide_btn")
+                    ) {
+                        Icon(Icons.Default.Fullscreen, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Exit Guide", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
