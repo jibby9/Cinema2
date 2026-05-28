@@ -20,6 +20,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _playableUri = MutableStateFlow<String?>(null)
     val playableUri: StateFlow<String?> = _playableUri.asStateFlow()
 
+    private val _currentPlayingChannel = MutableStateFlow<IptvChannel?>(null)
+    val currentPlayingChannel: StateFlow<IptvChannel?> = _currentPlayingChannel.asStateFlow()
+
     private val _requestHeaders = MutableStateFlow<Map<String, String>>(emptyMap())
     val requestHeaders: StateFlow<Map<String, String>> = _requestHeaders.asStateFlow()
 
@@ -69,6 +72,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // IPTV States
     private val _isIptvModeActive = MutableStateFlow(false)
     val isIptvModeActive: StateFlow<Boolean> = _isIptvModeActive.asStateFlow()
+
+    private val _activeIptvTab = MutableStateFlow(0)
+    val activeIptvTab: StateFlow<Int> = _activeIptvTab.asStateFlow()
+
+    fun setActiveIptvTab(tab: Int) {
+        _activeIptvTab.value = tab
+    }
 
     private val _xtreamAccounts = MutableStateFlow<List<XtreamAccount>>(emptyList())
     val xtreamAccounts: StateFlow<List<XtreamAccount>> = _xtreamAccounts.asStateFlow()
@@ -322,6 +332,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun playTestVideo() {
         Log.d(TAG, "Playing test video URL: $defaultTestVideoUrl")
         _requestHeaders.value = emptyMap()
+        _currentPlayingChannel.value = null
         _playableUri.value = defaultTestVideoUrl
         _errorMessage.value = null
     }
@@ -330,6 +341,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _playableUri.value = uri
         if (uri != null) {
             _errorMessage.value = null
+        } else {
+            _currentPlayingChannel.value = null
         }
     }
 
@@ -398,6 +411,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playIptvChannel(channel: IptvChannel) {
+        _currentPlayingChannel.value = channel
         setPlayableUri(channel.streamUrl)
         viewModelScope.launch {
             preferenceManager.saveLastChannelId(channel.id)
@@ -406,6 +420,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val activeXtream = _xtreamAccounts.value.find { it.isActive }
         if (activeXtream != null) {
             fetchXtreamEpgForChannel(channel.id)
+        }
+    }
+
+    fun playNextIptvChannel(activeList: List<IptvChannel>) {
+        if (activeList.isEmpty()) return
+        val current = _currentPlayingChannel.value ?: activeList.firstOrNull() ?: return
+        val currentIndex = activeList.indexOfFirst { it.id == current.id }
+        if (currentIndex == -1) {
+            playIptvChannel(activeList.first())
+        } else {
+            val nextIndex = (currentIndex + 1) % activeList.size
+            playIptvChannel(activeList[nextIndex])
+        }
+    }
+
+    fun playPreviousIptvChannel(activeList: List<IptvChannel>) {
+        if (activeList.isEmpty()) return
+        val current = _currentPlayingChannel.value ?: activeList.firstOrNull() ?: return
+        val currentIndex = activeList.indexOfFirst { it.id == current.id }
+        if (currentIndex == -1) {
+            playIptvChannel(activeList.last())
+        } else {
+            val prevIndex = (currentIndex - 1 + activeList.size) % activeList.size
+            playIptvChannel(activeList[prevIndex])
         }
     }
 

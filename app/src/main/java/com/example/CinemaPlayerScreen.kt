@@ -41,6 +41,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.vector.ImageVector
+
 // Color definitions local to this file to match "Sophisticated Dark" and guarantee error-free builds
 private val IndigoPrimary = Color(0xFF6366F1)       // Vibrant Indigo Accent
 private val IndigoSecondary = Color(0xFF4F46E5)     // Deep Indigo Accent
@@ -75,6 +83,9 @@ fun CinemaPlayerScreen(
 
     // IPTV state collection
     val isIptvModeActive by viewModel.isIptvModeActive.collectAsState()
+    val iptvChannels by viewModel.iptvChannels.collectAsState()
+    val epgProgrammes by viewModel.epgProgrammes.collectAsState()
+    val currentPlayingChannel by viewModel.currentPlayingChannel.collectAsState()
 
     val clipboardManager = LocalClipboardManager.current
     val configuration = LocalConfiguration.current
@@ -128,6 +139,16 @@ fun CinemaPlayerScreen(
                     activeResizeMode = activeResizeMode,
                     onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
                     isSettingsLoaded = isSettingsLoaded,
+                    isIptvActive = isIptvModeActive,
+                    channels = iptvChannels,
+                    epgList = epgProgrammes,
+                    currentPlayingChannel = currentPlayingChannel,
+                    onPlayChannel = { ch -> viewModel.playIptvChannel(ch) },
+                    onPlayNextChannel = { list -> viewModel.playNextIptvChannel(list) },
+                    onPlayPreviousChannel = { list -> viewModel.playPreviousIptvChannel(list) },
+                    showDebugPanel = showDebugPanel,
+                    onToggleDebug = { viewModel.toggleDebugPanel() },
+                    onSelectTab = { tab -> viewModel.setActiveIptvTab(tab) },
                     onLayoutChanged = { left, top, width, height ->
                         viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
                     },
@@ -362,6 +383,16 @@ fun CinemaTheaterLayout(
     activeResizeMode: String = "adaptive",
     onSelectResizeMode: (String) -> Unit = {},
     isSettingsLoaded: Boolean = true,
+    isIptvActive: Boolean = false,
+    channels: List<IptvChannel> = emptyList(),
+    epgList: List<EpgProgramme> = emptyList(),
+    currentPlayingChannel: IptvChannel? = null,
+    onPlayChannel: (IptvChannel) -> Unit = {},
+    onPlayNextChannel: (List<IptvChannel>) -> Unit = {},
+    onPlayPreviousChannel: (List<IptvChannel>) -> Unit = {},
+    showDebugPanel: Boolean = false,
+    onToggleDebug: () -> Unit = {},
+    onSelectTab: (Int) -> Unit = {},
     onLayoutChanged: (left: Float, top: Float, width: Float, height: Float) -> Unit = { _, _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
@@ -405,29 +436,41 @@ fun CinemaTheaterLayout(
         )
 
         // 3. Compute the adaptive player dimensions based on target area fraction (~0.96f)
-        val targetAreaFraction = 0.96f
+        val isMini = isIptvActive && playableUri != null && showDebugPanel
+
         val aspectR = detectedRatio.coerceIn(0.3f, 3.5f) // sensible min/max bounds
+        val miniWidthDp = if (maxWidth >= 600.dp) 240.dp else 180.dp
+        val miniHeightDp = miniWidthDp / aspectR
 
-        val targetArea = targetAreaFraction * containerAreaVal
-        val heightInit = kotlin.math.sqrt(targetArea / aspectR)
-        val widthInit = heightInit * aspectR
+        var calculatedWidth = 0f
+        var calculatedHeight = 0f
 
-        var calculatedWidth = widthInit
-        var calculatedHeight = heightInit
+        if (isMini) {
+            calculatedWidth = miniWidthDp.value
+            calculatedHeight = miniHeightDp.value
+        } else {
+            val targetAreaFraction = 0.96f
+            val targetArea = targetAreaFraction * containerAreaVal
+            val heightInit = kotlin.math.sqrt(targetArea / aspectR)
+            val widthInit = heightInit * aspectR
 
-        // Clamp to always fit perfectly within parent container constraints without distortion
-        if (calculatedWidth > containerWidthVal) {
-            calculatedWidth = containerWidthVal
-            calculatedHeight = containerWidthVal / aspectR
+            calculatedWidth = widthInit
+            calculatedHeight = heightInit
+
+            // Clamp to always fit perfectly within parent container constraints without distortion
+            if (calculatedWidth > containerWidthVal) {
+                calculatedWidth = containerWidthVal
+                calculatedHeight = containerWidthVal / aspectR
+            }
+            if (calculatedHeight > containerHeightVal) {
+                calculatedHeight = containerHeightVal
+                calculatedWidth = containerHeightVal * aspectR
+            }
+
+            // Apply a safe minimum bound to prevent potential collapsing layouts
+            calculatedWidth = calculatedWidth.coerceAtLeast(60f)
+            calculatedHeight = calculatedHeight.coerceAtLeast(60f)
         }
-        if (calculatedHeight > containerHeightVal) {
-            calculatedHeight = containerHeightVal
-            calculatedWidth = containerHeightVal * aspectR
-        }
-
-        // Apply a safe minimum bound to prevent potential collapsing layouts
-        calculatedWidth = calculatedWidth.coerceAtLeast(60f)
-        calculatedHeight = calculatedHeight.coerceAtLeast(60f)
 
         val playerWidth = calculatedWidth.dp
         val playerHeight = calculatedHeight.dp
@@ -443,9 +486,49 @@ fun CinemaTheaterLayout(
         var activeLeftFraction by remember { mutableStateOf(0f) }
         var activeTopFraction by remember { mutableStateOf(0f) }
 
+        // Snapping mini player setup:
+        var miniPlayerCorner by remember { mutableStateOf(0) } // 0: Top-Right, 1: Bottom-Right, 2: Bottom-Left, 3: Top-Left
+        var miniDragOffsetX by remember { mutableStateOf(0f) }
+        var miniDragOffsetY by remember { mutableStateOf(0f) }
+        var isMiniDragging by remember { mutableStateOf(false) }
+
+        val density = LocalDensity.current
+        val miniWidthPx = with(density) { miniWidthDp.toPx() }
+        val miniHeightPx = with(density) { miniHeightDp.toPx() }
+        val edgePaddingPx = with(density) { 16.dp.toPx() }
+        val topPaddingPx = with(density) { 72.dp.toPx() } // offset from status/title bar
+        val bottomPaddingPx = with(density) { 16.dp.toPx() }
+
+        val targetCornerLeftFrac: Float
+        val targetCornerTopFrac: Float
+
+        if (isMini) {
+            when (miniPlayerCorner) {
+                0 -> { // Top-Right
+                    targetCornerLeftFrac = (canvasWidthPx - miniWidthPx - edgePaddingPx) / canvasWidthPx
+                    targetCornerTopFrac = topPaddingPx / canvasHeightPx
+                }
+                1 -> { // Bottom-Right
+                    targetCornerLeftFrac = (canvasWidthPx - miniWidthPx - edgePaddingPx) / canvasWidthPx
+                    targetCornerTopFrac = (canvasHeightPx - miniHeightPx - bottomPaddingPx) / canvasHeightPx
+                }
+                2 -> { // Bottom-Left
+                    targetCornerLeftFrac = edgePaddingPx / canvasWidthPx
+                    targetCornerTopFrac = (canvasHeightPx - miniHeightPx - bottomPaddingPx) / canvasHeightPx
+                }
+                else -> { // Top-Left
+                    targetCornerLeftFrac = edgePaddingPx / canvasWidthPx
+                    targetCornerTopFrac = topPaddingPx / canvasHeightPx
+                }
+            }
+        } else {
+            targetCornerLeftFrac = 0f
+            targetCornerTopFrac = 0f
+        }
+
         // Proactively synchronize local dragging states when view layout modifications or screen dimensions update
-        LaunchedEffect(screenLayout.left, screenLayout.top, containerWidthVal, containerHeightVal, calculatedWidth, calculatedHeight, isDragging) {
-            if (!isDragging) {
+        LaunchedEffect(screenLayout.left, screenLayout.top, containerWidthVal, containerHeightVal, calculatedWidth, calculatedHeight, isDragging, isMini) {
+            if (!isDragging && !isMini) {
                 activeLeftFraction = if (isCustomized) {
                     screenLayout.left.coerceIn(0f, maxLeftFrac)
                 } else {
@@ -460,6 +543,27 @@ fun CinemaTheaterLayout(
                     (defaultTop / containerHeightVal).coerceIn(0f, maxTopFrac)
                 }
             }
+        }
+
+        // Compute fractions for offset
+        val finalLeftFraction = if (isMini) {
+            if (isMiniDragging) {
+                ((targetCornerLeftFrac * canvasWidthPx + miniDragOffsetX).coerceIn(0f, canvasWidthPx - miniWidthPx) / canvasWidthPx)
+            } else {
+                targetCornerLeftFrac.coerceIn(0f, (canvasWidthPx - miniWidthPx) / canvasWidthPx)
+            }
+        } else {
+            activeLeftFraction
+        }
+
+        val finalTopFraction = if (isMini) {
+            if (isMiniDragging) {
+                ((targetCornerTopFrac * canvasHeightPx + miniDragOffsetY).coerceIn(0f, canvasHeightPx - miniHeightPx) / canvasHeightPx)
+            } else {
+                targetCornerTopFrac.coerceIn(0f, (canvasHeightPx - miniHeightPx) / canvasHeightPx)
+            }
+        } else {
+            activeTopFraction
         }
 
         val cornerShape = RoundedCornerShape(themePreset.cornerRadiusDp.dp)
@@ -504,13 +608,59 @@ fun CinemaTheaterLayout(
             Modifier
         }
 
+        val miniDragModifier = if (isMini) {
+            Modifier.pointerInput(canvasWidthPx, canvasHeightPx, miniWidthPx, miniHeightPx) {
+                detectDragGestures(
+                    onDragStart = {
+                        isMiniDragging = true
+                        miniDragOffsetX = 0f
+                        miniDragOffsetY = 0f
+                    },
+                    onDragEnd = {
+                        isMiniDragging = false
+                        val finalLeftPx = targetCornerLeftFrac * canvasWidthPx + miniDragOffsetX
+                        val finalTopPx = targetCornerTopFrac * canvasHeightPx + miniDragOffsetY
+
+                        val centerPX = finalLeftPx + miniWidthPx / 2f
+                        val centerPY = finalTopPx + miniHeightPx / 2f
+                        val snapToRight = centerPX > canvasWidthPx / 2f
+                        val snapToBottom = centerPY > canvasHeightPx / 2f
+
+                        miniPlayerCorner = when {
+                            !snapToRight && !snapToBottom -> 3 // Top-Left
+                            snapToRight && !snapToBottom -> 0  // Top-Right
+                            !snapToRight && snapToBottom -> 2  // Bottom-Left
+                            else -> 1                          // Bottom-Right
+                        }
+                        miniDragOffsetX = 0f
+                        miniDragOffsetY = 0f
+                    },
+                    onDragCancel = {
+                        isMiniDragging = false
+                        miniDragOffsetX = 0f
+                        miniDragOffsetY = 0f
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        miniDragOffsetX += dragAmount.x
+                        miniDragOffsetY += dragAmount.y
+                    }
+                )
+            }
+        } else {
+            Modifier
+        }
+
+        val activeDragModifier = if (isMini) miniDragModifier else dragModifier
+
         // 5. Centered/Positioned Player container frame matching chosen theme visual assets
         Box(
             modifier = Modifier
+                .zIndex(if (isMini) 10f else 1f)
                 .offset {
                     IntOffset(
-                        x = (activeLeftFraction * canvasWidthPx).roundToInt(),
-                        y = (activeTopFraction * canvasHeightPx).roundToInt()
+                        x = (finalLeftFraction * canvasWidthPx).roundToInt(),
+                        y = (finalTopFraction * canvasHeightPx).roundToInt()
                     )
                 }
                 .size(width = playerWidth, height = playerHeight)
@@ -520,7 +670,7 @@ fun CinemaTheaterLayout(
                     val glowCol = themePreset.glowColor
                     val shadowFactor = themePreset.shadowIntensity
                     
-                    // Immersive drop-glow behind the video stream (reduced spread and intensity)
+                    // Immersive drop-glow behind the video stream
                     if (glowRadius > 0f) {
                         val passes = 4
                         for (i in 1..passes) {
@@ -607,7 +757,7 @@ fun CinemaTheaterLayout(
                         }
                     }
                 }
-                .then(dragModifier),
+                .then(activeDragModifier),
             contentAlignment = Alignment.Center
         ) {
             Box(
@@ -630,12 +780,88 @@ fun CinemaTheaterLayout(
                         modifier = Modifier.fillMaxSize(),
                         headers = headers,
                         displayMode = activeResizeMode,
+                        useController = !isIptvActive,
                         onVideoAspectRatioDetected = { ratio ->
                             detectedRatio = ratio
                         }
                     )
 
-                    if (!isEditMode) {
+                    // Overlay / Tap handling inside player for IPTV mode
+                    if (isIptvActive && !isMini) {
+                        var isOverlayVisible by remember { mutableStateOf(false) }
+                        var userInteractionTrigger by remember { mutableStateOf(0) }
+
+                        LaunchedEffect(isOverlayVisible, userInteractionTrigger) {
+                            if (isOverlayVisible) {
+                                kotlinx.coroutines.delay(5000)
+                                isOverlayVisible = false
+                            }
+                        }
+
+                        // Invisible clickable region over player to capture taps and toggle IPTV overlay
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable(
+                                    indication = null,
+                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                                ) {
+                                    isOverlayVisible = !isOverlayVisible
+                                    userInteractionTrigger++
+                                }
+                        )
+
+                        // If overlay visible, render Info Overlay & Channel Controls
+                        AnimatedVisibility(
+                            visible = isOverlayVisible,
+                            enter = fadeIn() + expandVertically(expandFrom = Alignment.Bottom),
+                            exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Bottom)
+                        ) {
+                            LiveInfoOverlay(
+                                currentPlayingChannel = currentPlayingChannel,
+                                channels = channels,
+                                epgList = epgList,
+                                onPlayChannel = onPlayChannel,
+                                onPlayNextChannel = onPlayNextChannel,
+                                onPlayPreviousChannel = onPlayPreviousChannel,
+                                onToggleDebug = onToggleDebug,
+                                onSelectTab = onSelectTab,
+                                showDebugPanel = showDebugPanel,
+                                onDismiss = { isOverlayVisible = false },
+                                onInteraction = { userInteractionTrigger++ }
+                            )
+                        }
+                    }
+
+                    if (isMini) {
+                        var isMiniControlsVisible by remember { mutableStateOf(false) }
+
+                        // Clicking mini player toggles corner overlay buttons
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable(
+                                    indication = null,
+                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                                ) {
+                                    isMiniControlsVisible = !isMiniControlsVisible
+                                }
+                        )
+
+                        if (isMiniControlsVisible) {
+                            MiniPlayerControls(
+                                miniPlayerCorner = miniPlayerCorner,
+                                onCycleCorner = { miniPlayerCorner = (miniPlayerCorner + 1) % 4 },
+                                onRestoreFullScreen = {
+                                    onToggleDebug()
+                                },
+                                onStopStream = onClearPlaySource,
+                                onDismiss = { isMiniControlsVisible = false }
+                            )
+                        }
+                    }
+
+                    if (!isEditMode && !isMini) {
                         var isSettingsDropdownExpanded by remember { mutableStateOf(false) }
 
                         Box(
@@ -774,6 +1000,453 @@ fun CinemaTheaterLayout(
             )
         }
     }
+}
+
+@Composable
+fun LiveInfoOverlay(
+    currentPlayingChannel: IptvChannel?,
+    channels: List<IptvChannel>,
+    epgList: List<EpgProgramme>,
+    onPlayChannel: (IptvChannel) -> Unit,
+    onPlayNextChannel: (List<IptvChannel>) -> Unit,
+    onPlayPreviousChannel: (List<IptvChannel>) -> Unit,
+    onToggleDebug: () -> Unit,
+    onSelectTab: (Int) -> Unit,
+    showDebugPanel: Boolean,
+    onDismiss: () -> Unit,
+    onInteraction: () -> Unit
+) {
+    if (currentPlayingChannel == null) return
+
+    val (currentProg, nextProg) = getNowAndNextForChannel(currentPlayingChannel, epgList)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.45f))
+            .clickable(
+                indication = null,
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+            ) { onDismiss() },
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                ) { onInteraction() }, // Intercept child click to avoid dismiss
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = Color(0xFF0F1115).copy(alpha = 0.92f)
+            ),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp)
+            ) {
+                // Top header: Channel info + optional logo
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = IndigoPrimary.copy(alpha = 0.15f),
+                            modifier = Modifier.size(36.dp),
+                            border = BorderStroke(1.dp, IndigoPrimary.copy(alpha = 0.4f))
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Tv,
+                                    contentDescription = null,
+                                    tint = IndigoPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        Column {
+                            Text(
+                                text = currentPlayingChannel.name,
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = currentPlayingChannel.categoryId.takeIf { it.isNotBlank() } ?: "All Channels",
+                                color = Color.Gray,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    // TV Guide Quick Access & Close Info button
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = {
+                                onSelectTab(1) // Tab 1 is TV Guide tab
+                                if (!showDebugPanel) {
+                                    onToggleDebug() // Open EPG side/bottom drawer panel
+                                }
+                                onDismiss()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = IndigoPrimary.copy(alpha = 0.2f),
+                                contentColor = IndigoPrimary
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.height(32.dp).testTag("guide_button_overlay")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DateRange,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("TV Guide", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(32.dp),
+                            colors = IconButtonDefaults.iconButtonColors(containerColor = Color.White.copy(alpha = 0.05f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close overlay",
+                                tint = Color.LightGray,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Now playing segment
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFFEF4444).copy(alpha = 0.2f),
+                                contentColor = Color(0xFFEF4444)
+                            ) {
+                                Text(
+                                    text = "NOW",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                )
+                            }
+                            Text(
+                                text = currentProg.title,
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (!currentProg.description.isNullOrBlank()) {
+                            Text(
+                                text = currentProg.description ?: "",
+                                color = Color.LightGray.copy(alpha = 0.8f),
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
+                    }
+
+                    // Times duration
+                    Text(
+                        text = "${formatEpgTime(currentProg.startMs)} - ${formatEpgTime(currentProg.endMs)}",
+                        color = Color.Gray,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                // Progress Bar for Now Playing programme
+                val nowVal = System.currentTimeMillis()
+                val totalDuration = (currentProg.endMs - currentProg.startMs).toFloat()
+                val elapsed = (nowVal - currentProg.startMs).toFloat()
+                val progressFraction = if (totalDuration > 0f) (elapsed / totalDuration).coerceIn(0f, 1f) else 0f
+
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { progressFraction },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = IndigoPrimary,
+                    trackColor = Color.White.copy(alpha = 0.08f)
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Up Next segment
+                if (nextProg != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color.White.copy(alpha = 0.06f),
+                                contentColor = Color.LightGray
+                            ) {
+                                Text(
+                                    text = "NEXT",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                )
+                            }
+                            Text(
+                                text = nextProg.title,
+                                color = Color.Gray,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Text(
+                            text = formatEpgTime(nextProg.startMs),
+                            color = Color.Gray.copy(alpha = 0.7f),
+                            fontSize = 11.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                } else {
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
+
+                // Channel Control buttons (Surfing)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = {
+                            onPlayPreviousChannel(channels)
+                            onInteraction()
+                        },
+                        modifier = Modifier
+                            .size(44.dp)
+                            .testTag("prev_channel_overlay_button"),
+                        colors = IconButtonDefaults.iconButtonColors(containerColor = Color.White.copy(alpha = 0.04f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SkipPrevious,
+                            contentDescription = "Previous channel",
+                            tint = Color.White
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color.White.copy(alpha = 0.04f),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowUp,
+                                contentDescription = null,
+                                tint = IndigoPrimary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "CHANNEL SURFING",
+                                color = Color.LightGray,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.1.sp
+                            )
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = null,
+                                tint = IndigoPrimary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = {
+                            onPlayNextChannel(channels)
+                            onInteraction()
+                        },
+                        modifier = Modifier
+                            .size(44.dp)
+                            .testTag("next_channel_overlay_button"),
+                        colors = IconButtonDefaults.iconButtonColors(containerColor = Color.White.copy(alpha = 0.04f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SkipNext,
+                            contentDescription = "Next channel",
+                            tint = Color.White
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MiniPlayerControls(
+    miniPlayerCorner: Int,
+    onCycleCorner: () -> Unit,
+    onRestoreFullScreen: () -> Unit,
+    onStopStream: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.62f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Restore Button
+            IconButton(
+                onClick = {
+                    onRestoreFullScreen()
+                    onDismiss()
+                },
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = IndigoPrimary,
+                    contentColor = Color.White
+                ),
+                modifier = Modifier
+                    .size(40.dp)
+                    .testTag("mini_player_restore")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Fullscreen,
+                    contentDescription = "Restore Full Screen",
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Cycle Corner / Position Button
+                IconButton(
+                    onClick = onCycleCorner,
+                    colors = IconButtonDefaults.iconButtonColors(
+                        containerColor = Color.White.copy(alpha = 0.12f),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("mini_player_cycle_corner")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Snap to next corner",
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                // Stop Stream / Close Button
+                IconButton(
+                    onClick = {
+                        onStopStream()
+                        onDismiss()
+                    },
+                    colors = IconButtonDefaults.iconButtonColors(
+                        containerColor = Color(0xFFEF4444),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("mini_player_close")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close Player",
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+fun formatEpgTime(timeMs: Long): String {
+    val formatter = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+    return formatter.format(java.util.Date(timeMs))
+}
+
+fun getNowAndNextForChannel(
+    channel: IptvChannel,
+    epgList: List<EpgProgramme>
+): Pair<EpgProgramme, EpgProgramme?> {
+    val now = System.currentTimeMillis()
+    val channelEpgs = epgList.filter { it.channelId == channel.id }.sortedBy { it.startMs }
+    
+    val current = channelEpgs.find { now in it.startMs..it.endMs }
+        ?: EpgProgramme(
+            channelId = channel.id,
+            title = "Live Broadcast",
+            startMs = now - 3600000L,
+            endMs = now + 4 * 3600000L,
+            description = "Click the 'TV Guide' button to browse detailed programming schedules."
+        )
+
+    val next = channelEpgs.find { it.startMs >= current.endMs }
+        ?: channelEpgs.find { it.startMs > now }
+
+    return Pair(current, next)
 }
 
 private fun checkRatioResize(

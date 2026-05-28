@@ -51,7 +51,7 @@ fun IptvDashboard(
     viewModel: MainViewModel,
     modifier: Modifier = Modifier
 ) {
-    var activeTab by remember { mutableStateOf(0) } // 0: Channels, 1: TV Guide, 2: Setup/Sources
+    val activeTab by viewModel.activeIptvTab.collectAsState()
     
     val xtreamAccounts by viewModel.xtreamAccounts.collectAsState()
     val m3uPlaylists by viewModel.m3uPlaylists.collectAsState()
@@ -79,21 +79,21 @@ fun IptvDashboard(
         ) {
             Tab(
                 selected = activeTab == 0,
-                onClick = { activeTab = 0 },
+                onClick = { viewModel.setActiveIptvTab(0) },
                 text = { Text("Channels", fontWeight = FontWeight.SemiBold, fontSize = 12.sp) },
                 icon = { Icon(Icons.Default.Tv, contentDescription = null, modifier = Modifier.size(18.dp)) },
                 modifier = Modifier.testTag("iptv_tab_channels")
             )
             Tab(
                 selected = activeTab == 1,
-                onClick = { activeTab = 1 },
+                onClick = { viewModel.setActiveIptvTab(1) },
                 text = { Text("TV Guide", fontWeight = FontWeight.SemiBold, fontSize = 12.sp) },
                 icon = { Icon(Icons.Default.MenuBook, contentDescription = null, modifier = Modifier.size(18.dp)) },
                 modifier = Modifier.testTag("iptv_tab_guide")
             )
             Tab(
                 selected = activeTab == 2,
-                onClick = { activeTab = 2 },
+                onClick = { viewModel.setActiveIptvTab(2) },
                 text = { Text("Sources", fontWeight = FontWeight.SemiBold, fontSize = 12.sp) },
                 icon = { Icon(Icons.Default.SettingsInputComponent, contentDescription = null, modifier = Modifier.size(18.dp)) },
                 modifier = Modifier.testTag("iptv_tab_sources")
@@ -135,7 +135,7 @@ fun IptvDashboard(
         Box(modifier = Modifier.weight(1f)) {
             if (!countsActive && activeTab != 2) {
                 // If no active sources exist, show prompt to set up
-                IptvEmptyStatePrompt(onActionClick = { activeTab = 2 })
+                IptvEmptyStatePrompt(onActionClick = { viewModel.setActiveIptvTab(2) })
             } else {
                 when (activeTab) {
                     0 -> IptvChannelsTab(viewModel = viewModel)
@@ -478,6 +478,7 @@ fun IptvGuideTab(
     val categories by viewModel.iptvCategories.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val searchQuery by viewModel.iptvSearchQuery.collectAsState()
+    val currentPlayingChannel by viewModel.currentPlayingChannel.collectAsState()
 
     var showSearchField by remember { mutableStateOf(false) }
     var selectedProgDetail by remember { mutableStateOf<Pair<IptvChannel, EpgProgramme>?>(null) }
@@ -720,6 +721,8 @@ fun IptvGuideTab(
                                     getProgrammesForChannel(ch, epgList, timelineStartMs, timelineEndMs)
                                 }
 
+                                val isCurrentPlayingCh = currentPlayingChannel?.id == ch.id
+
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -731,7 +734,14 @@ fun IptvGuideTab(
                                         modifier = Modifier
                                             .width(stickyColumnWidth)
                                             .fillMaxHeight()
-                                            .background(Color.White.copy(alpha = 0.02f))
+                                            .background(
+                                                if (isCurrentPlayingCh) IndigoPrimary.copy(alpha = 0.15f)
+                                                else Color.White.copy(alpha = 0.02f)
+                                            )
+                                            .border(
+                                                width = if (isCurrentPlayingCh) 1.dp else 0.dp,
+                                                color = if (isCurrentPlayingCh) IndigoPrimary.copy(alpha = 0.6f) else Color.Transparent
+                                            )
                                             .clickable { viewModel.playIptvChannel(ch) }
                                             .padding(6.dp),
                                         contentAlignment = Alignment.CenterStart
@@ -796,6 +806,7 @@ fun IptvGuideTab(
                                                 val nowVal = System.currentTimeMillis()
                                                 val isCurrent = nowVal in prog.startMs..prog.endMs
                                                 val isDummy = prog.title.startsWith("No Scheduling Info") || prog.description?.contains("placeholder") == true
+                                                val isCurrentAndPlaying = isCurrent && isCurrentPlayingCh
 
                                                 Card(
                                                     modifier = Modifier
@@ -814,14 +825,16 @@ fun IptvGuideTab(
                                                     shape = RoundedCornerShape(8.dp),
                                                     colors = CardDefaults.cardColors(
                                                         containerColor = when {
+                                                            isCurrentAndPlaying -> IndigoPrimary.copy(alpha = 0.4f)
                                                             isCurrent -> IndigoPrimary.copy(alpha = 0.22f)
                                                             isDummy -> Color.Black.copy(alpha = 0.4f)
                                                             else -> Color.White.copy(alpha = 0.04f)
                                                         }
                                                     ),
                                                     border = BorderStroke(
-                                                        width = 1.dp,
+                                                        width = if (isCurrentAndPlaying) 1.5.dp else 1.dp,
                                                         color = when {
+                                                            isCurrentAndPlaying -> IndigoPrimary
                                                             isCurrent -> IndigoPrimary.copy(alpha = 0.7f)
                                                             isDummy -> Color.White.copy(alpha = 0.02f)
                                                             else -> Color.White.copy(alpha = 0.08f)

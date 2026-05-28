@@ -36,6 +36,7 @@ fun VideoPlayerView(
     modifier: Modifier = Modifier,
     headers: Map<String, String> = emptyMap(),
     displayMode: String = "adaptive",
+    useController: Boolean = true,
     onVideoAspectRatioDetected: (Float) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -147,7 +148,7 @@ fun VideoPlayerView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     player = exoPlayer
-                    useController = true // Standard play, pause, seek Controls
+                    this.useController = useController
                     setShutterBackgroundColor(android.graphics.Color.BLACK)
                     layoutParams = FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -161,6 +162,7 @@ fun VideoPlayerView(
                 if (playerView.player != exoPlayer) {
                     playerView.player = exoPlayer
                 }
+                playerView.useController = useController
                 playerView.resizeMode = when (displayMode.lowercase()) {
                     "fit" -> AspectRatioFrameLayout.RESIZE_MODE_FIT
                     "zoom" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
