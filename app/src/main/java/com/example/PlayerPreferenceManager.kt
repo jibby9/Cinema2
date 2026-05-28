@@ -14,6 +14,7 @@ class PlayerPreferenceManager(private val context: Context) {
     companion object {
         val KEY_SELECTED_THEME_ID = stringPreferencesKey("selected_theme_id")
         val KEY_SELECTED_ASPECT_RATIO = stringPreferencesKey("selected_aspect_ratio")
+        val KEY_SELECTED_RESIZE_MODE = stringPreferencesKey("selected_resize_mode")
 
         // Tema: Cinema positions
         val KEY_CINEMA_LEFT = floatPreferencesKey("cinema_left")
@@ -49,6 +50,13 @@ class PlayerPreferenceManager(private val context: Context) {
      */
     val selectedAspectRatioId: Flow<String> = context.dataStore.data.map { preferences ->
         preferences[KEY_SELECTED_ASPECT_RATIO] ?: "free"
+    }
+
+    /**
+     * Emits the currently selected resize mode for the video player (defaults to "adaptive").
+     */
+    val selectedResizeMode: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[KEY_SELECTED_RESIZE_MODE] ?: "adaptive"
     }
 
     /**
@@ -101,6 +109,15 @@ class PlayerPreferenceManager(private val context: Context) {
     suspend fun saveSelectedAspectRatio(aspectRatioId: String) {
         context.dataStore.edit { preferences ->
             preferences[KEY_SELECTED_ASPECT_RATIO] = aspectRatioId
+        }
+    }
+
+    /**
+     * Saves the chosen resize mode preset.
+     */
+    suspend fun saveSelectedResizeMode(resizeModeId: String) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_SELECTED_RESIZE_MODE] = resizeModeId
         }
     }
 

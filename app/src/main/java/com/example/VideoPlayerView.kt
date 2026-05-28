@@ -26,6 +26,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.AspectRatioFrameLayout
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -34,6 +35,7 @@ fun VideoPlayerView(
     onPlaybackError: (String) -> Unit,
     modifier: Modifier = Modifier,
     headers: Map<String, String> = emptyMap(),
+    displayMode: String = "adaptive",
     onVideoAspectRatioDetected: (Float) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -158,6 +160,12 @@ fun VideoPlayerView(
                 // Make sure player matches the current instance
                 if (playerView.player != exoPlayer) {
                     playerView.player = exoPlayer
+                }
+                playerView.resizeMode = when (displayMode.lowercase()) {
+                    "fit" -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    "zoom" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    "fill" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                    else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
                 }
             }
         )

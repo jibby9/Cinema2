@@ -3,6 +3,8 @@ package com.example
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -67,6 +69,7 @@ fun CinemaPlayerScreen(
     val screenLayout by viewModel.screenLayout.collectAsState()
     val isEditMode by viewModel.isEditMode.collectAsState()
     val activeAspectRatioId by viewModel.activeAspectRatioId.collectAsState()
+    val activeResizeMode by viewModel.activeResizeMode.collectAsState()
     val isSettingsLoaded by viewModel.isSettingsLoaded.collectAsState()
 
     val clipboardManager = LocalClipboardManager.current
@@ -125,6 +128,8 @@ fun CinemaPlayerScreen(
                             onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
                             isEditMode = isEditMode,
                             activeAspectRatioId = activeAspectRatioId,
+                            activeResizeMode = activeResizeMode,
+                            onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
                             isSettingsLoaded = isSettingsLoaded,
                             onLayoutChanged = { left, top, width, height ->
                                 viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
@@ -160,48 +165,41 @@ fun CinemaPlayerScreen(
                     }
                 }
             } else {
-                // Adaptive layout: Vertical stack for standard portrait phones
-                Column(
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(paddingValues)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Top: Ambient viewport projection area
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CinemaTheaterLayout(
-                            themePreset = activeThemePreset,
-                            screenLayout = screenLayout,
-                            playableUri = playableUri,
-                            errorMessage = errorMessage,
-                            headers = requestHeaders,
-                            onPlayTestVideo = { viewModel.playTestVideo() },
-                            onClearPlaySource = { viewModel.setPlayableUri(null) },
-                            onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
-                            isEditMode = isEditMode,
-                            activeAspectRatioId = activeAspectRatioId,
-                            isSettingsLoaded = isSettingsLoaded,
-                            onLayoutChanged = { left, top, width, height ->
-                                viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
+                    CinemaTheaterLayout(
+                        themePreset = activeThemePreset,
+                        screenLayout = screenLayout,
+                        playableUri = playableUri,
+                        errorMessage = errorMessage,
+                        headers = requestHeaders,
+                        onPlayTestVideo = { viewModel.playTestVideo() },
+                        onClearPlaySource = { viewModel.setPlayableUri(null) },
+                        onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
+                        isEditMode = isEditMode,
+                        activeAspectRatioId = activeAspectRatioId,
+                        activeResizeMode = activeResizeMode,
+                        onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
+                        isSettingsLoaded = isSettingsLoaded,
+                        onLayoutChanged = { left, top, width, height ->
+                            viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
 
-                    // Bottom: Tabbed console interface (Themes, adjustments, and diagnostics)
+                    // Bottom Panel overlay
                     AnimatedVisibility(
                         visible = showDebugPanel,
-                        enter = fadeIn(),
-                        exit = fadeOut(),
+                        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
                         modifier = Modifier
+                            .align(Alignment.BottomCenter)
                             .fillMaxWidth()
-                            .weight(1.2f)
+                            .fillMaxHeight(0.48f)
+                            .padding(16.dp)
                     ) {
                         InteractiveConsolePanel(
                             viewModel = viewModel,
@@ -327,6 +325,8 @@ fun CinemaTheaterLayout(
     onPlaybackError: (String) -> Unit,
     isEditMode: Boolean = false,
     activeAspectRatioId: String = "free",
+    activeResizeMode: String = "adaptive",
+    onSelectResizeMode: (String) -> Unit = {},
     isSettingsLoaded: Boolean = true,
     onLayoutChanged: (left: Float, top: Float, width: Float, height: Float) -> Unit = { _, _, _, _ -> },
     modifier: Modifier = Modifier
@@ -596,31 +596,93 @@ fun CinemaTheaterLayout(
                         onPlaybackError = onPlaybackError,
                         modifier = Modifier.fillMaxSize(),
                         headers = headers,
+                        displayMode = activeResizeMode,
                         onVideoAspectRatioDetected = { ratio ->
                             detectedRatio = ratio
                         }
                     )
 
                     if (!isEditMode) {
+                        var isSettingsDropdownExpanded by remember { mutableStateOf(false) }
+
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(8.dp),
                             contentAlignment = Alignment.TopEnd
                         ) {
-                            IconButton(
-                                onClick = onClearPlaySource,
-                                colors = IconButtonDefaults.iconButtonColors(
-                                    containerColor = Color.Black.copy(alpha = 0.65f)
-                                ),
-                                modifier = Modifier.size(32.dp)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Stop streams",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(15.dp)
-                                )
+                                // Settings Cog Button
+                                Box {
+                                    IconButton(
+                                        onClick = { isSettingsDropdownExpanded = true },
+                                        colors = IconButtonDefaults.iconButtonColors(
+                                            containerColor = Color.Black.copy(alpha = 0.65f)
+                                        ),
+                                        modifier = Modifier.size(32.dp).testTag("settings_cog")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Settings,
+                                            contentDescription = "Playback display settings",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = isSettingsDropdownExpanded,
+                                        onDismissRequest = { isSettingsDropdownExpanded = false },
+                                        modifier = Modifier.background(ObsidianSurface)
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Adaptive default", color = Color.White, fontSize = 13.sp) },
+                                            onClick = {
+                                                onSelectResizeMode("adaptive")
+                                                isSettingsDropdownExpanded = false
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Fit", color = Color.White, fontSize = 13.sp) },
+                                            onClick = {
+                                                onSelectResizeMode("fit")
+                                                isSettingsDropdownExpanded = false
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Zoom to fill", color = Color.White, fontSize = 13.sp) },
+                                            onClick = {
+                                                onSelectResizeMode("zoom")
+                                                isSettingsDropdownExpanded = false
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Fill / stretch (Distortion)", color = Color.White, fontSize = 13.sp) },
+                                            onClick = {
+                                                onSelectResizeMode("fill")
+                                                isSettingsDropdownExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+
+                                // Close Button
+                                IconButton(
+                                    onClick = onClearPlaySource,
+                                    colors = IconButtonDefaults.iconButtonColors(
+                                        containerColor = Color.Black.copy(alpha = 0.65f)
+                                    ),
+                                    modifier = Modifier.size(32.dp).testTag("close_player_source")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Stop streams",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -1292,80 +1354,12 @@ fun InteractiveConsolePanel(
                         // Section: Screen Position Sliders
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(
-                                text = "SCREEN POSITION & SIZE ADJUSTMENTS",
+                                text = "AMBIENT STYLE ADJUSTMENTS",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 1.2.sp,
                                     color = Color.White.copy(alpha = 0.5f)
                                 )
-                            )
-
-                            TuningSlider(
-                                label = "Screen Width",
-                                value = screenLayout.width,
-                                range = 0.10f..1.00f,
-                                icon = Icons.Default.AspectRatio,
-                                activeColor = activeThemePreset.primaryColor,
-                                onValueChange = { newW ->
-                                    viewModel.updateScreenLayout(
-                                        left = screenLayout.left,
-                                        top = screenLayout.top,
-                                        width = newW,
-                                        height = screenLayout.height,
-                                        dimAlpha = screenLayout.dimAlpha
-                                    )
-                                }
-                            )
-
-                            TuningSlider(
-                                label = "Screen Height",
-                                value = screenLayout.height,
-                                range = 0.10f..1.00f,
-                                icon = Icons.Default.Height,
-                                activeColor = activeThemePreset.primaryColor,
-                                onValueChange = { newH ->
-                                    viewModel.updateScreenLayout(
-                                        left = screenLayout.left,
-                                        top = screenLayout.top,
-                                        width = screenLayout.width,
-                                        height = newH,
-                                        dimAlpha = screenLayout.dimAlpha
-                                    )
-                                }
-                            )
-
-                            TuningSlider(
-                                label = "Horizontal Position (Left)",
-                                value = screenLayout.left,
-                                range = 0.00f..(1.00f - screenLayout.width).coerceAtLeast(0.01f),
-                                icon = Icons.Default.ArrowBack,
-                                activeColor = activeThemePreset.primaryColor,
-                                onValueChange = { newL ->
-                                    viewModel.updateScreenLayout(
-                                        left = newL,
-                                        top = screenLayout.top,
-                                        width = screenLayout.width,
-                                        height = screenLayout.height,
-                                        dimAlpha = screenLayout.dimAlpha
-                                    )
-                                }
-                            )
-
-                            TuningSlider(
-                                label = "Vertical Position (Top)",
-                                value = screenLayout.top,
-                                range = 0.00f..(1.00f - screenLayout.height).coerceAtLeast(0.01f),
-                                icon = Icons.Default.ArrowUpward,
-                                activeColor = activeThemePreset.primaryColor,
-                                onValueChange = { newT ->
-                                    viewModel.updateScreenLayout(
-                                        left = screenLayout.left,
-                                        top = newT,
-                                        width = screenLayout.width,
-                                        height = screenLayout.height,
-                                        dimAlpha = screenLayout.dimAlpha
-                                    )
-                                }
                             )
 
                             TuningSlider(

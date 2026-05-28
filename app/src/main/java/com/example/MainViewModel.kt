@@ -45,6 +45,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _activeAspectRatioId = MutableStateFlow("free")
     val activeAspectRatioId: StateFlow<String> = _activeAspectRatioId.asStateFlow()
 
+    private val _activeResizeMode = MutableStateFlow("adaptive")
+    val activeResizeMode: StateFlow<String> = _activeResizeMode.asStateFlow()
+
     private val _screenLayout = MutableStateFlow(
         ScreenLayoutSettings(
             ThemePresets.Cinema.defaultLeft,
@@ -82,6 +85,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
+            preferenceManager.selectedResizeMode.collect { mode ->
+                _activeResizeMode.value = mode
+            }
+        }
+
+        viewModelScope.launch {
             // Keep screen layout settings in sync with whichever theme is currently chosen
             _activeThemeId.collect { id ->
                 _isSettingsLoaded.value = false
@@ -108,6 +117,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             Log.d(TAG, "Selecting aspect ratio: $id")
             _activeAspectRatioId.value = id
             preferenceManager.saveSelectedAspectRatio(id)
+        }
+    }
+
+    fun selectResizeMode(modeId: String) {
+        viewModelScope.launch {
+            Log.d(TAG, "Selecting resize mode: $modeId")
+            _activeResizeMode.value = modeId
+            preferenceManager.saveSelectedResizeMode(modeId)
         }
     }
 
@@ -182,6 +199,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _activeThemeId.value = "cinema"
             _activeThemePreset.value = preset
             _activeAspectRatioId.value = "free"
+            _activeResizeMode.value = "adaptive"
             _isSettingsLoaded.value = true
             // Save in background
             preferenceManager.resetAllSettings()
