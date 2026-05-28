@@ -81,6 +81,7 @@ fun CinemaPlayerScreen(
     val activeAspectRatioId by viewModel.activeAspectRatioId.collectAsState()
     val activeResizeMode by viewModel.activeResizeMode.collectAsState()
     val isSettingsLoaded by viewModel.isSettingsLoaded.collectAsState()
+    val isAnimationEnabled by viewModel.isAnimationEnabled.collectAsState()
 
     // IPTV state collection
     val isIptvModeActive by viewModel.isIptvModeActive.collectAsState()
@@ -107,6 +108,7 @@ fun CinemaPlayerScreen(
             themePreset = activeThemePreset,
             isEditMode = isEditMode,
             customBackgroundUri = customBackgroundUri,
+            isAnimationEnabled = isAnimationEnabled,
             modifier = Modifier.fillMaxSize()
         )
 
@@ -132,6 +134,7 @@ fun CinemaPlayerScreen(
                     onCloseGuide = { viewModel.setDebugPanelVisible(false) },
                     mediaPlayerContent = {
                         CinemaTheaterLayout(
+                            viewModel = viewModel,
                             themePreset = activeThemePreset,
                             screenLayout = screenLayout.copy(dimAlpha = 0f),
                             playableUri = playableUri,
@@ -159,6 +162,9 @@ fun CinemaPlayerScreen(
                             onSelectTab = { tab -> viewModel.setActiveIptvTab(tab) },
                             onLayoutChanged = { _, _, _, _ -> },
                             isEpgGuideMode = true,
+                            isAnimationEnabled = isAnimationEnabled,
+                            onToggleAnimation = { enabled -> viewModel.setAnimationEnabled(enabled) },
+                            onSelectTheme = { id -> viewModel.selectTheme(id) },
                             modifier = Modifier.fillMaxSize()
                         )
                     },
@@ -179,6 +185,7 @@ fun CinemaPlayerScreen(
                             .fillMaxHeight()
                     ) {
                         CinemaTheaterLayout(
+                            viewModel = viewModel,
                             themePreset = activeThemePreset,
                             screenLayout = screenLayout,
                             playableUri = playableUri,
@@ -207,6 +214,9 @@ fun CinemaPlayerScreen(
                             onLayoutChanged = { left, top, width, height ->
                                 viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
                             },
+                            isAnimationEnabled = isAnimationEnabled,
+                            onToggleAnimation = { enabled -> viewModel.setAnimationEnabled(enabled) },
+                            onSelectTheme = { id -> viewModel.selectTheme(id) },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -242,6 +252,7 @@ fun CinemaPlayerScreen(
                 ) {
                     // 1. Full-Screen CinemaTheaterLayout rendering behind everything across the complete screen canvas
                     CinemaTheaterLayout(
+                        viewModel = viewModel,
                         themePreset = activeThemePreset,
                         screenLayout = screenLayout,
                         playableUri = playableUri,
@@ -270,6 +281,9 @@ fun CinemaPlayerScreen(
                         onLayoutChanged = { left, top, width, height ->
                             viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
                         },
+                        isAnimationEnabled = isAnimationEnabled,
+                        onToggleAnimation = { enabled -> viewModel.setAnimationEnabled(enabled) },
+                        onSelectTheme = { id -> viewModel.selectTheme(id) },
                         modifier = Modifier.fillMaxSize()
                     )
 
@@ -569,6 +583,7 @@ fun CinemaTitleBar(
  */
 @Composable
 fun CinemaTheaterLayout(
+    viewModel: MainViewModel,
     themePreset: ThemePreset,
     screenLayout: ScreenLayoutSettings,
     playableUri: String?,
@@ -596,10 +611,14 @@ fun CinemaTheaterLayout(
     onSelectTab: (Int) -> Unit = {},
     onLayoutChanged: (left: Float, top: Float, width: Float, height: Float) -> Unit = { _, _, _, _ -> },
     isEpgGuideMode: Boolean = false,
+    isAnimationEnabled: Boolean = true,
+    onToggleAnimation: (Boolean) -> Unit = {},
+    onSelectTheme: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // 1. Live state tracking the detected aspect ratio of the active stream
     var detectedRatio by remember { mutableStateOf(1.7777778f) } // default 16:9
+    var activePlayer by remember { mutableStateOf<androidx.media3.exoplayer.ExoPlayer?>(null) }
 
     // Ambient aspect ratio fallback when empty or on startup
     val presetRatio = AspectRatioPreset.getById(activeAspectRatioId).ratio
@@ -1019,18 +1038,37 @@ fun CinemaTheaterLayout(
                     ),
                 contentAlignment = Alignment.Center
             ) {
+                val syncConfig by viewModel.tickerSyncConfig.collectAsState()
+                val scoreState by viewModel.tickerScore.collectAsState()
+                val isTickerActive = scoreState != null
+                val tickerPaddingTop = if (isTickerActive && syncConfig.tickerPosition == TickerPosition.TOP) 100.dp else 0.dp
+                val tickerPaddingBottom = if (isTickerActive && syncConfig.tickerPosition == TickerPosition.BOTTOM) 100.dp else 0.dp
+
                 if (!playableUri.isNullOrBlank()) {
                     VideoPlayerView(
                         videoUrl = playableUri,
                         onPlaybackError = onPlaybackError,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(top = tickerPaddingTop, bottom = tickerPaddingBottom),
                         headers = headers,
                         displayMode = activeResizeMode,
                         useController = !isIptvActive,
                         onVideoAspectRatioDetected = { ratio ->
                             detectedRatio = ratio
-                        }
+                        },
+                        onPlayerInitialized = { activePlayer = it }
                     )
+
+                    if (isTickerActive) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(if (syncConfig.tickerPosition == TickerPosition.TOP) Alignment.TopCenter else Alignment.BottomCenter)
+                        ) {
+                            LiveSportsTickerUI(viewModel = viewModel)
+                        }
+                    }
 
                     // Overlay / Tap handling inside player for IPTV mode
                     if (isIptvActive && !isMini) {
@@ -1109,7 +1147,7 @@ fun CinemaTheaterLayout(
                     }
 
                     if (!isEditMode && !isMini) {
-                        var isSettingsDropdownExpanded by remember { mutableStateOf(false) }
+                        var isPlayerSettingsDialogVisible by remember { mutableStateOf(false) }
 
                         Box(
                             modifier = Modifier
@@ -1124,7 +1162,7 @@ fun CinemaTheaterLayout(
                                 // Settings Cog Button
                                 Box {
                                     IconButton(
-                                        onClick = { isSettingsDropdownExpanded = true },
+                                        onClick = { isPlayerSettingsDialogVisible = true },
                                         colors = IconButtonDefaults.iconButtonColors(
                                             containerColor = Color.Black.copy(alpha = 0.65f)
                                         ),
@@ -1138,37 +1176,302 @@ fun CinemaTheaterLayout(
                                         )
                                     }
 
-                                    DropdownMenu(
-                                        expanded = isSettingsDropdownExpanded,
-                                        onDismissRequest = { isSettingsDropdownExpanded = false },
-                                        modifier = Modifier.background(ObsidianSurface)
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text("Adaptive default", color = Color.White, fontSize = 13.sp) },
-                                            onClick = {
-                                                onSelectResizeMode("adaptive")
-                                                isSettingsDropdownExpanded = false
-                                            }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Fit", color = Color.White, fontSize = 13.sp) },
-                                            onClick = {
-                                                onSelectResizeMode("fit")
-                                                isSettingsDropdownExpanded = false
-                                            }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Zoom to fill", color = Color.White, fontSize = 13.sp) },
-                                            onClick = {
-                                                onSelectResizeMode("zoom")
-                                                isSettingsDropdownExpanded = false
-                                            }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Fill / stretch (Distortion)", color = Color.White, fontSize = 13.sp) },
-                                            onClick = {
-                                                onSelectResizeMode("fill")
-                                                isSettingsDropdownExpanded = false
+                                    if (isPlayerSettingsDialogVisible) {
+                                        AlertDialog(
+                                            onDismissRequest = { isPlayerSettingsDialogVisible = false },
+                                            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+                                            modifier = Modifier
+                                                .fillMaxWidth(0.9f)
+                                                .widthIn(max = 500.dp)
+                                                .padding(16.dp)
+                                                .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(16.dp))
+                                                .testTag("player_settings_dialog"),
+                                            containerColor = ObsidianSurface,
+                                            shape = RoundedCornerShape(16.dp),
+                                            title = {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Settings,
+                                                        contentDescription = null,
+                                                        tint = themePreset.primaryColor,
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                    Text(
+                                                        text = "Player & Environment Settings",
+                                                        color = Color.White,
+                                                        fontSize = 16.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            },
+                                            text = {
+                                                Column(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                                                ) {
+                                                    // SECTION 1: Resizing Modes
+                                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        Text(
+                                                            text = "1. ASPECT RESIZE MODE",
+                                                            color = Color.White.copy(alpha = 0.5f),
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            letterSpacing = 1.sp
+                                                        )
+                                                        Row(
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                        ) {
+                                                            listOf(
+                                                                "adaptive" to "Adaptive",
+                                                                "fit" to "Fit",
+                                                                "zoom" to "Zoom",
+                                                                "fill" to "Stretch"
+                                                            ).forEach { (mode, title) ->
+                                                                val isSelected = activeResizeMode == mode
+                                                                Button(
+                                                                    onClick = { onSelectResizeMode(mode) },
+                                                                    colors = ButtonDefaults.buttonColors(
+                                                                        containerColor = if (isSelected) themePreset.primaryColor else Color.White.copy(alpha = 0.05f),
+                                                                        contentColor = if (isSelected) Color.White else TextSilver
+                                                                    ),
+                                                                    shape = RoundedCornerShape(8.dp),
+                                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                                    modifier = Modifier
+                                                                        .weight(1f)
+                                                                        .height(36.dp)
+                                                                ) {
+                                                                    Text(title, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // SECTION 2: Subtitle Settings
+                                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        Text(
+                                                            text = "2. SUBTITLES & CAPTIONS",
+                                                            color = Color.White.copy(alpha = 0.5f),
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            letterSpacing = 1.sp
+                                                        )
+
+                                                        if (activePlayer == null) {
+                                                            Card(
+                                                                colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.02f)),
+                                                                modifier = Modifier.fillMaxWidth()
+                                                            ) {
+                                                                Text(
+                                                                    text = "Player initializing...",
+                                                                    color = TextMuted,
+                                                                    fontSize = 12.sp,
+                                                                    modifier = Modifier.padding(10.dp)
+                                                                )
+                                                            }
+                                                        } else {
+                                                            // Extract available tracks
+                                                            val textTrackOptions = remember(activePlayer, activePlayer?.currentTracks) {
+                                                                val list = mutableListOf<SubtitleTrackInfo>()
+                                                                activePlayer?.currentTracks?.groups?.forEach { group ->
+                                                                    if (group.type == androidx.media3.common.C.TRACK_TYPE_TEXT) {
+                                                                        for (i in 0 until group.length) {
+                                                                            val isSelected = group.isTrackSelected(i)
+                                                                            val format = group.getTrackFormat(i)
+                                                                            val name = format.label ?: format.language?.uppercase() ?: "Track ${list.size + 1}"
+                                                                            list.add(SubtitleTrackInfo(group = group, trackIndex = i, label = name, isSelected = isSelected))
+                                                                        }
+                                                                    }
+                                                                }
+                                                                list
+                                                            }
+
+                                                            // Off & Auto default modes
+                                                            val isSubtitlesDisabled = activePlayer?.trackSelectionParameters?.disabledTrackTypes?.contains(androidx.media3.common.C.TRACK_TYPE_TEXT) == true
+                                                            val hasNoOverrides = activePlayer?.trackSelectionParameters?.overrides?.keys?.any { it.type == androidx.media3.common.C.TRACK_TYPE_TEXT } == false
+                                                            val isAutoSelected = !isSubtitlesDisabled && hasNoOverrides
+
+                                                            Row(
+                                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                                modifier = Modifier.fillMaxWidth()
+                                                            ) {
+                                                                // Subtitles OFF Button
+                                                                Button(
+                                                                    onClick = {
+                                                                        activePlayer?.trackSelectionParameters = activePlayer!!.trackSelectionParameters
+                                                                            .buildUpon()
+                                                                            .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT, true)
+                                                                            .build()
+                                                                    },
+                                                                    colors = ButtonDefaults.buttonColors(
+                                                                        containerColor = if (isSubtitlesDisabled) themePreset.primaryColor else Color.White.copy(alpha = 0.05f),
+                                                                        contentColor = Color.White
+                                                                    ),
+                                                                    shape = RoundedCornerShape(8.dp),
+                                                                    contentPadding = PaddingValues(horizontal = 8.dp),
+                                                                    modifier = Modifier.weight(1f).height(36.dp)
+                                                                ) {
+                                                                    Text("No Subtitles (Off)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                                }
+
+                                                                // Subtitles Auto Button
+                                                                Button(
+                                                                    onClick = {
+                                                                        activePlayer?.trackSelectionParameters = activePlayer!!.trackSelectionParameters
+                                                                            .buildUpon()
+                                                                            .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT, false)
+                                                                            .clearOverridesOfType(androidx.media3.common.C.TRACK_TYPE_TEXT)
+                                                                            .build()
+                                                                    },
+                                                                    colors = ButtonDefaults.buttonColors(
+                                                                        containerColor = if (isAutoSelected) themePreset.primaryColor else Color.White.copy(alpha = 0.05f),
+                                                                        contentColor = Color.White
+                                                                    ),
+                                                                    shape = RoundedCornerShape(8.dp),
+                                                                    contentPadding = PaddingValues(horizontal = 8.dp),
+                                                                    modifier = Modifier.weight(1f).height(36.dp)
+                                                                ) {
+                                                                    Text("Auto (Default)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                                }
+                                                            }
+
+                                                            if (textTrackOptions.isEmpty()) {
+                                                                Text(
+                                                                    text = "No subtitle tracks available for this stream",
+                                                                    color = TextMuted,
+                                                                    fontSize = 11.sp,
+                                                                    modifier = Modifier.padding(top = 4.dp).testTag("no_subtitles_text")
+                                                                )
+                                                            } else {
+                                                                Text(
+                                                                    text = "Detected Tracks:",
+                                                                    color = Color.White.copy(alpha = 0.7f),
+                                                                    fontSize = 11.sp,
+                                                                    fontWeight = FontWeight.SemiBold,
+                                                                    modifier = Modifier.padding(top = 4.dp)
+                                                                )
+                                                                // Scrollable list of actual embedded tracks
+                                                                androidx.compose.foundation.lazy.LazyRow(
+                                                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                                ) {
+                                                                    items(textTrackOptions.size) { index ->
+                                                                        val track = textTrackOptions[index]
+                                                                        val selected = !isSubtitlesDisabled && track.isSelected
+                                                                        Button(
+                                                                            onClick = {
+                                                                                activePlayer?.trackSelectionParameters = activePlayer!!.trackSelectionParameters
+                                                                                    .buildUpon()
+                                                                                    .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT, false)
+                                                                                    .setOverrideForType(
+                                                                                        androidx.media3.common.TrackSelectionOverride(
+                                                                                            track.group.mediaTrackGroup,
+                                                                                            track.trackIndex
+                                                                                        )
+                                                                                    )
+                                                                                    .build()
+                                                                            },
+                                                                            colors = ButtonDefaults.buttonColors(
+                                                                                containerColor = if (selected) themePreset.primaryColor else Color.White.copy(alpha = 0.05f),
+                                                                                contentColor = Color.White
+                                                                            ),
+                                                                            shape = RoundedCornerShape(8.dp),
+                                                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                                            modifier = Modifier.height(34.dp)
+                                                                        ) {
+                                                                            Text("✏️ ${track.label}", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // SECTION 3: Themes & Animation
+                                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        Text(
+                                                            text = "3. ENVIRONMENT PRESETS & ANIMATIONS",
+                                                            color = Color.White.copy(alpha = 0.5f),
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            letterSpacing = 1.sp
+                                                        )
+
+                                                        // Compact Horizontal Theme Bar (Scrollable)
+                                                        androidx.compose.foundation.lazy.LazyRow(
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                            contentPadding = PaddingValues(vertical = 4.dp)
+                                                        ) {
+                                                            val allThemes = ThemePresets.all
+                                                            items(allThemes.size) { index ->
+                                                                val preset = allThemes[index]
+                                                                val isSelected = themePreset.id == preset.id
+                                                                Button(
+                                                                    onClick = { onSelectTheme(preset.id) },
+                                                                    colors = ButtonDefaults.buttonColors(
+                                                                        containerColor = if (isSelected) themePreset.primaryColor else Color.White.copy(alpha = 0.05f),
+                                                                        contentColor = Color.White
+                                                                    ),
+                                                                    shape = RoundedCornerShape(8.dp),
+                                                                    modifier = Modifier.height(36.dp)
+                                                                ) {
+                                                                    Text(
+                                                                        text = if (preset.isAnimated) "✨ ${preset.name}" else preset.name,
+                                                                        fontSize = 11.sp,
+                                                                        fontWeight = FontWeight.Bold
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+
+                                                        Spacer(modifier = Modifier.height(2.dp))
+
+                                                        // Animation Switch Toggle
+                                                        Row(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .background(Color.White.copy(alpha = 0.02f))
+                                                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.SpaceBetween
+                                                        ) {
+                                                            Column(modifier = Modifier.weight(1f)) {
+                                                                Text(
+                                                                    "Live Animated Backdrops",
+                                                                    color = Color.White,
+                                                                    fontSize = 12.sp,
+                                                                    fontWeight = FontWeight.SemiBold
+                                                                )
+                                                                Text(
+                                                                    "Conserves battery and GPU when off.",
+                                                                    color = TextMuted,
+                                                                    fontSize = 10.sp
+                                                                )
+                                                            }
+                                                            Switch(
+                                                                checked = isAnimationEnabled,
+                                                                onCheckedChange = onToggleAnimation,
+                                                                colors = SwitchDefaults.colors(
+                                                                    checkedThumbColor = Color.White,
+                                                                    checkedTrackColor = themePreset.primaryColor,
+                                                                    uncheckedThumbColor = TextMuted,
+                                                                    uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
+                                                                ),
+                                                                modifier = Modifier.testTag("animated_backdrop_switch")
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            confirmButton = {
+                                                TextButton(onClick = { isPlayerSettingsDialogVisible = false }) {
+                                                    Text("Dismiss", color = themePreset.primaryColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                                }
                                             }
                                         )
                                     }
@@ -2976,3 +3279,11 @@ fun TuningSlider(
         )
     }
 }
+
+private data class SubtitleTrackInfo(
+    val group: androidx.media3.common.Tracks.Group,
+    val trackIndex: Int,
+    val label: String,
+    val isSelected: Boolean
+)
+

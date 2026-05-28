@@ -27,7 +27,9 @@ data class ThemePreset(
     val vignetteStrength: Float = 0.4f,
     val ambientColorTint: Color = Color.Transparent,
     val backdropImageResId: Int? = null,
-    val foregroundImageResId: Int? = null
+    val foregroundImageResId: Int? = null,
+    val isAnimated: Boolean = false,
+    val animationType: String? = null
 )
 
 /**
@@ -136,7 +138,79 @@ object ThemePresets {
         foregroundImageResId = null
     )
 
-    val all = listOf(Cinema, CosyCabin, SportsArena, Custom)
+    val Aurora = ThemePreset(
+        id = "aurora",
+        name = "Aurora Borealis",
+        description = "Ethereal northern lights with moving organic ribbons of neon green, blue, and deep purple.",
+        defaultLeft = 0.10f,
+        defaultTop = 0.15f,
+        defaultWidth = 0.80f,
+        defaultHeight = 0.45f,
+        defaultDimAlpha = 0.60f,
+        defaultSubtitleOffset = 0.05f,
+        primaryColor = Color(0xFF10B981), // Green Aurora
+        secondaryColor = Color(0xFF4C1D95), // Deep Purple
+        cornerRadiusDp = 12,
+        frameThicknessDp = 5,
+        frameColor = Color(0xFF1E293B),
+        glowColor = Color(0x4410B981),
+        glowRadiusDp = 16,
+        shadowIntensity = 0.45f,
+        vignetteStrength = 0.5f,
+        ambientColorTint = Color(0x1010B981),
+        isAnimated = true,
+        animationType = "aurora"
+    )
+
+    val Matrix = ThemePreset(
+        id = "matrix",
+        name = "Matrix Rain",
+        description = "Falling green cyber streams of digital rain pulsing on an obsidian terminal backdrop.",
+        defaultLeft = 0.10f,
+        defaultTop = 0.15f,
+        defaultWidth = 0.80f,
+        defaultHeight = 0.45f,
+        defaultDimAlpha = 0.85f,
+        defaultSubtitleOffset = 0.05f,
+        primaryColor = Color(0xFF00FF41), // Matrix Green
+        secondaryColor = Color(0xFF0D1117), // Deep Dark Grey
+        cornerRadiusDp = 0, // Cyber brutalist
+        frameThicknessDp = 4,
+        frameColor = Color(0xFF0F172A),
+        glowColor = Color(0x3B00FF41),
+        glowRadiusDp = 10,
+        shadowIntensity = 0.6f,
+        vignetteStrength = 0.7f,
+        ambientColorTint = Color(0x1A00FF41),
+        isAnimated = true,
+        animationType = "matrix"
+    )
+
+    val Stardust = ThemePreset(
+        id = "stardust",
+        name = "Cosmic Stardust",
+        description = "Slow orbital twinkling stars and celestial particles drifting gently across the cosmos.",
+        defaultLeft = 0.10f,
+        defaultTop = 0.12f,
+        defaultWidth = 0.80f,
+        defaultHeight = 0.48f,
+        defaultDimAlpha = 0.50f,
+        defaultSubtitleOffset = 0.05f,
+        primaryColor = Color(0xFFA5B4FC), // Lavender / Cosmic Blue
+        secondaryColor = Color(0xFF1E1B4B), // Deep Blue Indigo
+        cornerRadiusDp = 16,
+        frameThicknessDp = 6,
+        frameColor = Color(0xFF020617),
+        glowColor = Color(0x40818CF8),
+        glowRadiusDp = 18,
+        shadowIntensity = 0.4f,
+        vignetteStrength = 0.4f,
+        ambientColorTint = Color(0x15818CF8),
+        isAnimated = true,
+        animationType = "stardust"
+    )
+
+    val all = listOf(Cinema, CosyCabin, SportsArena, Custom, Aurora, Matrix, Stardust)
 
     fun getById(id: String): ThemePreset {
         return all.find { it.id.lowercase() == id.lowercase() } ?: Cinema

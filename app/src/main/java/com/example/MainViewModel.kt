@@ -8,6 +8,9 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -113,7 +116,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val lastChannelId: StateFlow<String?> = _lastChannelId.asStateFlow()
 
     private val _iptvCategories = MutableStateFlow<List<IptvCategory>>(emptyList())
-    val iptvCategories: StateFlow<List<IptvCategory>> = _iptvCategories.asStateFlow()
+    
+    private val _customCategoryOrder = MutableStateFlow<List<String>>(emptyList())
+    val customCategoryOrder: StateFlow<List<String>> = _customCategoryOrder.asStateFlow()
+
+    private val _hiddenCategoryIds = MutableStateFlow<Set<String>>(emptySet())
+    val hiddenCategoryIds: StateFlow<Set<String>> = _hiddenCategoryIds.asStateFlow()
+
+    val allRawIptvCategories: StateFlow<List<IptvCategory>> = _iptvCategories.asStateFlow()
+
+    val iptvCategories: StateFlow<List<IptvCategory>> = combine(
+        _iptvCategories,
+        _customCategoryOrder,
+        _hiddenCategoryIds
+    ) { rawCats, order, hiddenIds ->
+        val visibleCats = rawCats.filter { !hiddenIds.contains(it.id) }
+        val orderMap = order.withIndex().associate { it.value to it.index }
+        visibleCats.sortedWith(
+            compareBy<IptvCategory> { orderMap[it.id] ?: Int.MAX_VALUE }
+                .thenBy { rawCats.indexOf(it) }
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _iptvChannels = MutableStateFlow<List<IptvChannel>>(emptyList())
     val iptvChannels: StateFlow<List<IptvChannel>> = _iptvChannels.asStateFlow()
@@ -138,6 +161,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _epgLoadStatus = MutableStateFlow<String?>(null)
     val epgLoadStatus: StateFlow<String?> = _epgLoadStatus.asStateFlow()
+
+    private val _isAnimationEnabled = MutableStateFlow(true)
+    val isAnimationEnabled: StateFlow<Boolean> = _isAnimationEnabled.asStateFlow()
+
+    // Local Video Playback states
+    private val _recentLocalVideos = MutableStateFlow<List<RecentLocalVideo>>(emptyList())
+    val recentLocalVideos: StateFlow<List<RecentLocalVideo>> = _recentLocalVideos.asStateFlow()
+
+    private val _localVideoTitle = MutableStateFlow<String?>(null)
+    val localVideoTitle: StateFlow<String?> = _localVideoTitle.asStateFlow()
+
+    // Sports Schedule State fields
+    private val sportsRepository: SportsRepository = StaticSportsRepository()
+
+    private val _sportsEvents = MutableStateFlow<List<SportsEvent>>(emptyList())
+    val sportsEvents: StateFlow<List<SportsEvent>> = _sportsEvents.asStateFlow()
+
+    private val _selectedSportFilter = MutableStateFlow<String?>(null)
+    val selectedSportFilter: StateFlow<String?> = _selectedSportFilter.asStateFlow()
+
+    private val _sportsSearchQuery = MutableStateFlow("")
+    val sportsSearchQuery: StateFlow<String> = _sportsSearchQuery.asStateFlow()
+
+    private val _liveNowOnly = MutableStateFlow(false)
+    val liveNowOnly: StateFlow<Boolean> = _liveNowOnly.asStateFlow()
+
+    // Sports Ticker Manager integration
+    val sportsTickerManager = LiveSportsTickerManager()
+
+    val tickerScore: StateFlow<TickerScore?> = sportsTickerManager.scoreFlow
+    val tickerStats: StateFlow<List<TickerStat>> = sportsTickerManager.statsFlow
+    val tickerTimeline: StateFlow<List<TickerTimelineEvent>> = sportsTickerManager.timelineFlow
+    val tickerSyncConfig: StateFlow<TickerSyncConfig> = sportsTickerManager.syncConfig
+
+    private val _identifiedSportsEvent = MutableStateFlow<SportsEvent?>(null)
+    val identifiedSportsEvent: StateFlow<SportsEvent?> = _identifiedSportsEvent.asStateFlow()
 
     // Alternative Fallback URLs for easy switching during development:
     // Fallback Sample: "http://clips.vorwaerts-gmbh.de/big_buck_bunny.mp4"
@@ -192,6 +251,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
+            preferenceManager.isAnimationEnabled.collect { enabled ->
+                _isAnimationEnabled.value = enabled
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.iptvCategoryOrder.collect { order ->
+                _customCategoryOrder.value = order
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.iptvHiddenCategoryIds.collect { hidden ->
+                _hiddenCategoryIds.value = hidden
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.localRecentVideosJson.collect { json ->
+                _recentLocalVideos.value = deserializeRecentLocalVideos(json)
+            }
+        }
+
+        viewModelScope.launch {
             preferenceManager.xtreamAccountsJson.collect { json ->
                 _xtreamAccounts.value = deserializeAccounts(json)
                 loadActiveIptvSource()
@@ -228,6 +311,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _reminders.value = premiumStore.loadReminders()
 
         startRemindersPolling()
+        refreshSportsEvents()
 
         viewModelScope.launch {
             val lastPresetId = premiumStore.getLastPresetId()
@@ -262,6 +346,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             Log.d(TAG, "Selecting resize mode: $modeId")
             _activeResizeMode.value = modeId
             preferenceManager.saveSelectedResizeMode(modeId)
+        }
+    }
+
+    fun setAnimationEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            _isAnimationEnabled.value = enabled
+            preferenceManager.saveAnimationEnabled(enabled)
         }
     }
 
@@ -389,6 +480,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _errorMessage.value = null
         } else {
             _currentPlayingChannel.value = null
+            _identifiedSportsEvent.value = null
+            sportsTickerManager.stopTracking()
         }
     }
 
@@ -470,6 +563,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         _currentPlayingChannel.value = channel
         setPlayableUri(channel.streamUrl)
+        
+        onActiveChannelOrEpgChanged(channel)
+
         viewModelScope.launch {
             preferenceManager.saveLastChannelId(channel.id)
         }
@@ -1073,4 +1169,202 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         return list
     }
+
+    // --- Custom Categories Management ---
+
+    fun updateIptvCategoryOrder(newOrder: List<String>) {
+        viewModelScope.launch {
+            _customCategoryOrder.value = newOrder
+            preferenceManager.saveIptvCategoryOrder(newOrder)
+        }
+    }
+
+    fun toggleIptvCategoryVisibility(categoryId: String) {
+        viewModelScope.launch {
+            val currentHidden = _hiddenCategoryIds.value.toMutableSet()
+            if (currentHidden.contains(categoryId)) {
+                currentHidden.remove(categoryId)
+            } else {
+                currentHidden.add(categoryId)
+            }
+            _hiddenCategoryIds.value = currentHidden
+            preferenceManager.saveIptvHiddenCategoryIds(currentHidden)
+
+            val currentSelected = _selectedCategory.value
+            if (currentSelected != null && currentSelected.id == categoryId) {
+                val visibleList = _iptvCategories.value.filter { !currentHidden.contains(it.id) }
+                _selectedCategory.value = visibleList.firstOrNull()
+            }
+        }
+    }
+
+    fun resetIptvCategoriesToDefault() {
+        viewModelScope.launch {
+            _customCategoryOrder.value = emptyList()
+            _hiddenCategoryIds.value = emptySet()
+            preferenceManager.saveIptvCategoryOrder(emptyList())
+            preferenceManager.saveIptvHiddenCategoryIds(emptySet())
+        }
+    }
+
+    // --- Local Videos Playback Engine ---
+
+    fun playLocalVideo(uri: String, filename: String) {
+        _localVideoTitle.value = filename
+        val virtualChannel = IptvChannel(
+            id = "local_${uri.hashCode()}",
+            name = filename,
+            logoUrl = null,
+            streamUrl = uri,
+            categoryId = "Local Videos",
+            isFavorite = false
+        )
+        _currentPlayingChannel.value = virtualChannel
+        _playableUri.value = uri
+        _errorMessage.value = null
+        
+        saveRecentLocalVideo(uri, filename)
+    }
+
+    private fun saveRecentLocalVideo(uri: String, filename: String) {
+        viewModelScope.launch {
+            val current = _recentLocalVideos.value.toMutableList()
+            current.removeAll { it.uri == uri }
+            current.add(0, RecentLocalVideo(uri, filename))
+            val limited = current.take(10)
+            _recentLocalVideos.value = limited
+            preferenceManager.saveLocalRecentVideosJson(serializeRecentLocalVideos(limited))
+        }
+    }
+
+    fun removeRecentLocalVideo(uri: String) {
+        viewModelScope.launch {
+            val current = _recentLocalVideos.value.toMutableList()
+            current.removeAll { it.uri == uri }
+            _recentLocalVideos.value = current
+            preferenceManager.saveLocalRecentVideosJson(serializeRecentLocalVideos(current))
+        }
+    }
+
+    private fun deserializeRecentLocalVideos(json: String?): List<RecentLocalVideo> {
+        if (json.isNullOrBlank()) return emptyList()
+        val list = mutableListOf<RecentLocalVideo>()
+        try {
+            val arr = org.json.JSONArray(json)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    RecentLocalVideo(
+                        uri = obj.getString("uri"),
+                        title = obj.getString("title")
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to deserialize recent videos", e)
+        }
+        return list
+    }
+
+    private fun serializeRecentLocalVideos(list: List<RecentLocalVideo>): String {
+        val arr = org.json.JSONArray()
+        list.forEach { item ->
+            val obj = org.json.JSONObject()
+            obj.put("uri", item.uri)
+            obj.put("title", item.title)
+            arr.put(obj)
+        }
+        return arr.toString()
+    }
+
+    // --- Sports Scedules & Channel matching control ---
+
+    fun setSportFilter(sport: String?) {
+        _selectedSportFilter.value = sport
+    }
+
+    fun setSportsSearchQuery(query: String) {
+        _sportsSearchQuery.value = query
+    }
+
+    fun toggleLiveNowOnly() {
+        _liveNowOnly.value = !_liveNowOnly.value
+    }
+
+    fun refreshSportsEvents() {
+        sportsRepository.refreshEvents()
+        _sportsEvents.value = sportsRepository.getFeaturedEvents()
+    }
+
+    fun getMatchingChannelsForEvent(event: SportsEvent): List<ChannelMatchResult> {
+        return SportsChannelMatcher.matchEventToChannels(
+            event = event,
+            channels = _iptvChannels.value,
+            categories = allRawIptvCategories.value,
+            epgList = _epgProgrammes.value
+        )
+    }
+
+    fun startTrackingSportEvent(event: SportsEvent) {
+        _identifiedSportsEvent.value = event
+        sportsTickerManager.startTrackingEvent(event.title)
+    }
+
+    fun onActiveChannelOrEpgChanged(activeChan: IptvChannel) {
+        viewModelScope.launch {
+            // First we need event list
+            val events = _sportsEvents.value
+            if (events.isEmpty()) return@launch
+
+            var matchedEvent: SportsEvent? = null
+
+            // 1. Try to match currently playing EPG show text
+            val channelEpgs = _epgProgrammes.value.filter { it.channelId == activeChan.id || it.channelId == activeChan.epgId }
+            val now = System.currentTimeMillis()
+            val currentEpgObj = channelEpgs.find { now in it.startMs..it.endMs }
+
+            if (currentEpgObj != null) {
+                val title = currentEpgObj.title.lowercase()
+                matchedEvent = events.find { event ->
+                    val teamA = event.teamA?.lowercase() ?: ""
+                    val teamB = event.teamB?.lowercase() ?: ""
+                    val titleNorm = event.title.lowercase()
+                    (teamA.isNotEmpty() && title.contains(teamA)) || 
+                    (teamB.isNotEmpty() && title.contains(teamB)) ||
+                    title.contains(titleNorm)
+                }
+            }
+
+            // 2. If EPG didn't match, check by active channel name keywords
+            if (matchedEvent == null) {
+                val chanName = activeChan.name.lowercase()
+                matchedEvent = events.find { event ->
+                    val teamA = event.teamA?.lowercase() ?: ""
+                    val teamB = event.teamB?.lowercase() ?: ""
+                    (teamA.isNotEmpty() && chanName.contains(teamA)) ||
+                    (teamB.isNotEmpty() && chanName.contains(teamB))
+                }
+            }
+
+            // 3. Fallback: find any LIVE sports event for the matching category
+            if (matchedEvent == null) {
+                val chanName = activeChan.name.lowercase()
+                val isSportChan = chanName.contains("sport") || chanName.contains("f1") || chanName.contains("ufc")
+                if (isSportChan) {
+                    matchedEvent = events.find { it.getStatus() == "LIVE" }
+                }
+            }
+
+            // Update tracked event
+            matchedEvent?.let {
+                _identifiedSportsEvent.value = it
+                sportsTickerManager.startTrackingEvent(it.id) // track by id or title in manager
+            }
+        }
+    }
 }
+
+data class RecentLocalVideo(
+    val uri: String,
+    val title: String
+)

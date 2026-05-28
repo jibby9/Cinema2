@@ -5,8 +5,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -20,31 +19,113 @@ fun ThemeBackdrop(
     themePreset: ThemePreset,
     isEditMode: Boolean = false,
     customBackgroundUri: String? = null,
+    isAnimationEnabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val themeId = themePreset.id
+    val isAnim = isAnimationEnabled && !isEditMode
+    
     val infiniteTransition = rememberInfiniteTransition(label = "ambient_effects")
     
     // Projector flicker for cinema or fire heat glow for cabin
-    val glowPulse by infiniteTransition.animateFloat(
-        initialValue = 0.85f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "glow_pulse"
-    )
+    val glowPulse by if (isAnim) {
+        infiniteTransition.animateFloat(
+            initialValue = 0.85f,
+            targetValue = 1.0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1200, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "glow_pulse"
+        )
+    } else {
+        remember { mutableStateOf(1.0f) }
+    }
 
-    val projectorPulse by infiniteTransition.animateFloat(
-        initialValue = 0.95f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(150, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "projector_pulse"
-    )
+    val projectorPulse by if (isAnim) {
+        infiniteTransition.animateFloat(
+            initialValue = 0.95f,
+            targetValue = 1.0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(150, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "projector_pulse"
+        )
+    } else {
+        remember { mutableStateOf(1.0f) }
+    }
+
+    // Ethereal flow for Aurora theme
+    val auroraProgress by if (isAnim) {
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = (2.0f * Math.PI).toFloat(),
+            animationSpec = infiniteRepeatable(
+                animation = tween(12000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "aurora_progress"
+        )
+    } else {
+        remember { mutableStateOf(0f) }
+    }
+
+    // Falling code for Matrix Rain theme
+    val matrixProgress by if (isAnim) {
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1.0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(5000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "matrix_progress"
+        )
+    } else {
+        remember { mutableStateOf(0f) }
+    }
+
+    // Slow drift & twinkle for Cosmic Stardust
+    val stardustProgress by if (isAnim) {
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = (2.0f * Math.PI).toFloat(),
+            animationSpec = infiniteRepeatable(
+                animation = tween(20000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "stardust_progress"
+        )
+    } else {
+        remember { mutableStateOf(0f) }
+    }
+
+    val stardustTwinkle by if (isAnim) {
+        infiniteTransition.animateFloat(
+            initialValue = 0.3f,
+            targetValue = 1.0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(2500, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "stardust_twinkle"
+        )
+    } else {
+        remember { mutableStateOf(0.7f) }
+    }
+
+    // Star particles list generated deterministically inside a remember block
+    val starParticles = remember {
+        List(28) {
+            val xr = 0.05f + 0.9f * (Math.random().toFloat())
+            val yr = 0.05f + 0.9f * (Math.random().toFloat())
+            val size = 1.5f + 3f * (Math.random().toFloat())
+            val speed = 0.3f + 0.7f * (Math.random().toFloat())
+            val cycleOffset = Math.random().toFloat() * 2f * Math.PI.toFloat()
+            StarParticle(xr, yr, size, speed, cycleOffset)
+        }
+    }
 
     // Decorative opacity is scaled down in Edit Mode to help placement accuracy
     val decorMultiplier = if (isEditMode) 0.25f else 1.0f
@@ -55,6 +136,190 @@ fun ThemeBackdrop(
             .background(Color(0xFF030204)) // Absolute base deep contrast
     ) {
         when (themeId.lowercase()) {
+            "aurora" -> {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val width = size.width
+                    val height = size.height
+
+                    // 1. Deep Celestial Background
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF02021E), // Near black space
+                                Color(0xFF0D0A2A), // Dark starfield purple
+                                Color(0xFF04020F)  // Vacuum bottom
+                            )
+                        )
+                    )
+
+                    // 2. Animated Aurora Ribbons (paths with translucent radial/linear gradients)
+                    // Aurora Green Ribbon
+                    val p1 = Path()
+                    p1.moveTo(0f, height * 0.45f)
+                    for (x in 0..width.toInt() step 40) {
+                        val phase = (x.toFloat() / width) * 2.5f * Math.PI.toFloat() + auroraProgress
+                        val y = height * 0.45f + Math.sin(phase.toDouble()).toFloat() * 120f * decorMultiplier
+                        p1.lineTo(x.toFloat(), y)
+                    }
+                    p1.lineTo(width, height)
+                    p1.lineTo(0f, height)
+                    p1.close()
+
+                    drawPath(
+                        path = p1,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0x0010B981),
+                                Color(0x3B10B981).copy(alpha = 0.25f * glowPulse * decorMultiplier),
+                                Color(0x1B0D9488).copy(alpha = 0.12f * decorMultiplier),
+                                Color.Transparent
+                            ),
+                            startY = height * 0.3f,
+                            endY = height
+                        )
+                    )
+
+                    // Aurora Violet / Indigo Ribbon
+                    val p2 = Path()
+                    p2.moveTo(0f, height * 0.35f)
+                    for (x in 0..width.toInt() step 50) {
+                        val phase = (x.toFloat() / width) * 1.8f * Math.PI.toFloat() - auroraProgress * 1.2f
+                        val y = height * 0.32f + Math.cos(phase.toDouble()).toFloat() * 90f * decorMultiplier
+                        p2.lineTo(x.toFloat(), y)
+                    }
+                    p2.lineTo(width, height)
+                    p2.lineTo(0f, height)
+                    p2.close()
+
+                    drawPath(
+                        path = p2,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0x00A855F7),
+                                Color(0x306366F1).copy(alpha = 0.20f * decorMultiplier),
+                                Color(0x153B82F6),
+                                Color.Transparent
+                            ),
+                            startY = height * 0.2f,
+                            endY = height * 0.9f
+                        )
+                    )
+
+                    // Warm horizon aurora base glow
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFF14B8A6).copy(alpha = 0.15f * glowPulse * decorMultiplier),
+                                Color.Transparent
+                            ),
+                            center = Offset(width * 0.7f, height * 0.4f),
+                            radius = width * 0.5f
+                        )
+                    )
+                }
+            }
+
+            "matrix" -> {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val width = size.width
+                    val height = size.height
+
+                    // Cosmic black monitor base
+                    drawRect(color = Color(0xFF020503))
+
+                    // Falling terminal stream lines (18 tracks)
+                    val tracksCount = 18
+                    val gap = width / tracksCount
+                    for (c in 0 until tracksCount) {
+                        val offsetFrac = (c * 0.17f) % 1.0f
+                        val speedFrac = 0.7f + (c % 5) * 0.2f
+                        
+                        // Current leading y coordinate
+                        val trackingY = (height * (matrixProgress * speedFrac + offsetFrac)) % (height + 300f) - 150f
+
+                        // Draw falling indicator line
+                        if (trackingY > -200f) {
+                            drawRect(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        Color(0xFF00FF41).copy(alpha = 0.08f * decorMultiplier),
+                                        Color(0xFF00FF41).copy(alpha = 0.40f * decorMultiplier)
+                                    ),
+                                    startY = trackingY - 180f,
+                                    endY = trackingY
+                                ),
+                                topLeft = Offset(c * gap + gap/2f - 1.5f, trackingY - 180f),
+                                size = Size(3f, 180f)
+                            )
+
+                            // Bright digital neon drop point
+                            drawCircle(
+                                color = Color.White.copy(alpha = 0.95f * decorMultiplier),
+                                center = Offset(c * gap + gap/2f, trackingY),
+                                radius = 2.5f
+                            )
+                            drawCircle(
+                                color = Color(0xFF00FF41).copy(alpha = 0.6f * decorMultiplier),
+                                center = Offset(c * gap + gap/2f, trackingY),
+                                radius = 6f
+                            )
+                        }
+                    }
+                }
+            }
+
+            "stardust" -> {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val width = size.width
+                    val height = size.height
+
+                    // Space Deep Vacuum
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFF131032), // star nursery nebula violet
+                                Color(0xFF020208)
+                            ),
+                            center = Offset(width * 0.5f, height * 0.5f),
+                            radius = width * 0.75f
+                        )
+                    )
+
+                    // Draw Twinkling Star Objects with floating orbital drift
+                    starParticles.forEachIndexed { idx, star ->
+                        val driftX = Math.sin(stardustProgress.toDouble() * 0.3 + star.cycleOffset).toFloat() * 12f * decorMultiplier
+                        val driftY = Math.cos(stardustProgress.toDouble() * 0.2 + star.cycleOffset).toFloat() * 12f * decorMultiplier
+                        
+                        val startX = star.xr * width + driftX
+                        val startY = star.yr * height + driftY
+
+                        // Local pulsing scale
+                        val phaseTwinkle = Math.sin(stardustProgress.toDouble() * star.speed + star.cycleOffset).toFloat()
+                        val scale = (0.4f + 0.6f * ((phaseTwinkle + 1f) / 2f)) * stardustTwinkle * decorMultiplier
+
+                        // Outer glowing gas
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0xFFE2E8F0).copy(alpha = 0.35f * scale),
+                                    Color.Transparent
+                                ),
+                                center = Offset(startX, startY),
+                                radius = star.size * 5f
+                            )
+                        )
+
+                        // Deep Core Star
+                        drawCircle(
+                            color = Color.White.copy(alpha = 0.9f * scale),
+                            center = Offset(startX, startY),
+                            radius = star.size * 0.8f
+                        )
+                    }
+                }
+            }
+
             "cosy_cabin" -> {
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val width = size.width
@@ -253,7 +518,6 @@ fun ThemeBackdrop(
 
             "custom" -> {
                 if (!customBackgroundUri.isNullOrBlank()) {
-                    // Modern Coil AsyncImage for loading custom background image from internal storage or URI
                     coil.compose.AsyncImage(
                         model = customBackgroundUri,
                         contentDescription = "Custom theme backdrop background",
@@ -264,14 +528,13 @@ fun ThemeBackdrop(
                         }
                     )
                 } else {
-                    // Fallback background layout if custom background is not loaded
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val width = size.width
                         val height = size.height
                         drawRect(
                             brush = Brush.radialGradient(
                                 colors = listOf(
-                                    Color(0xFFEC4899).copy(alpha = 0.18f), // Soft dark pink ambient glow
+                                    Color(0xFFEC4899).copy(alpha = 0.18f),
                                     Color(0xFF030204)
                                 ),
                                 center = Offset(width / 2f, height / 2f),
@@ -291,7 +554,7 @@ fun ThemeBackdrop(
                     drawRect(
                         brush = Brush.radialGradient(
                             colors = listOf(
-                                Color(0xFF1E1B4B).copy(alpha = 0.40f), // Soft dark purple ambient glow
+                                Color(0xFF1E1B4B).copy(alpha = 0.40f),
                                 Color(0xFF030204)
                             ),
                             center = Offset(width / 2f, height / 2f),
@@ -299,7 +562,7 @@ fun ThemeBackdrop(
                         )
                     )
 
-                    // 2. Real-time Projector beam (shining down from top-center of the theater!)
+                    // 2. Real-time Projector beam
                     val projectorBeam = Path().apply {
                         moveTo(width / 2f - 40f, 0f)
                         lineTo(width / 2f + 40f, 0f)
@@ -311,8 +574,8 @@ fun ThemeBackdrop(
                         path = projectorBeam,
                         brush = Brush.verticalGradient(
                             colors = listOf(
-                                Color(0xFF818CF8).copy(alpha = 0.22f * projectorPulse * decorMultiplier), // Indigo projector bulbs
-                                Color(0xFF4F46E5).copy(alpha = 0.06f * projectorPulse * decorMultiplier), // Light violet scatter
+                                Color(0xFF818CF8).copy(alpha = 0.22f * projectorPulse * decorMultiplier),
+                                Color(0xFF4F46E5).copy(alpha = 0.06f * projectorPulse * decorMultiplier),
                                 Color.Transparent
                             ),
                             startY = 0f,
@@ -320,7 +583,7 @@ fun ThemeBackdrop(
                         )
                     )
 
-                    // 3. Render seat rows outlines silhouette at the bottom (opacity 25%)
+                    // 3. Render seat rows outlines silhouette at bottom
                     val rowY = height * 0.92f
                     drawLine(
                         color = Color(0xFF312E81).copy(alpha = 0.20f * decorMultiplier),
@@ -328,7 +591,7 @@ fun ThemeBackdrop(
                         end = Offset(width, rowY),
                         strokeWidth = 24f
                     )
-                    // Chair silhouettes
+                    
                     val chairWidth = 32f
                     val chairSpacing = 16f
                     var currentX = chairSpacing
@@ -379,3 +642,12 @@ fun ThemeBackdrop(
         }
     }
 }
+
+// Helper models for Stardust particles
+private data class StarParticle(
+    val xr: Float,
+    val yr: Float,
+    val size: Float,
+    val speed: Float,
+    val cycleOffset: Float
+)

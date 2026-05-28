@@ -37,7 +37,8 @@ fun VideoPlayerView(
     headers: Map<String, String> = emptyMap(),
     displayMode: String = "adaptive",
     useController: Boolean = true,
-    onVideoAspectRatioDetected: (Float) -> Unit = {}
+    onVideoAspectRatioDetected: (Float) -> Unit = {},
+    onPlayerInitialized: (ExoPlayer?) -> Unit = {}
 ) {
     val context = LocalContext.current
     var isLoading by remember { mutableStateOf(true) }
@@ -110,10 +111,13 @@ fun VideoPlayerView(
             }
         }
         exoPlayer.addListener(listener)
+        // Handover player reference to host UI
+        onPlayerInitialized(exoPlayer)
 
         onDispose {
             exoPlayer.removeListener(listener)
             exoPlayer.release()
+            onPlayerInitialized(null)
         }
     }
 
