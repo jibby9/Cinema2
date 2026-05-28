@@ -101,119 +101,95 @@ fun CinemaPlayerScreen(
                 )
             }
         ) { paddingValues ->
-            if (isExpandedLayout) {
-                // Adaptive layout: Split-screen horizontal row for unfolded tablets or premium foldable displays
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues)
-                        .padding(horizontal = 24.dp, vertical = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(24.dp)
-                ) {
-                    // Left Side: Projector Video Player Screen area with responsive drawn theme environment
-                    Column(
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+            ) {
+                // 1. Full-Screen CinemaTheaterLayout rendering behind everything across the complete screen canvas
+                CinemaTheaterLayout(
+                    themePreset = activeThemePreset,
+                    screenLayout = screenLayout,
+                    playableUri = playableUri,
+                    errorMessage = errorMessage,
+                    headers = requestHeaders,
+                    onPlayTestVideo = { viewModel.playTestVideo() },
+                    onClearPlaySource = { viewModel.setPlayableUri(null) },
+                    onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
+                    isEditMode = isEditMode,
+                    activeAspectRatioId = activeAspectRatioId,
+                    activeResizeMode = activeResizeMode,
+                    onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
+                    isSettingsLoaded = isSettingsLoaded,
+                    onLayoutChanged = { left, top, width, height ->
+                        viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // 2. Overlaid Interactive Console and Settings Panels
+                if (isExpandedLayout) {
+                    // Right-side floating sidebar layout for tablet/foldables
+                    Row(
                         modifier = Modifier
-                            .weight(1.3f)
-                            .fillMaxHeight(),
-                        verticalArrangement = Arrangement.Center
+                            .fillMaxSize()
+                            .padding(paddingValues)
+                            .padding(horizontal = 24.dp, vertical = 16.dp),
+                        horizontalArrangement = Arrangement.End
                     ) {
-                        CinemaTheaterLayout(
-                            themePreset = activeThemePreset,
-                            screenLayout = screenLayout,
-                            playableUri = playableUri,
-                            errorMessage = errorMessage,
-                            headers = requestHeaders,
-                            onPlayTestVideo = { viewModel.playTestVideo() },
-                            onClearPlaySource = { viewModel.setPlayableUri(null) },
-                            onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
-                            isEditMode = isEditMode,
-                            activeAspectRatioId = activeAspectRatioId,
-                            activeResizeMode = activeResizeMode,
-                            onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
-                            isSettingsLoaded = isSettingsLoaded,
-                            onLayoutChanged = { left, top, width, height ->
-                                viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
-                            },
+                        AnimatedVisibility(
+                            visible = showDebugPanel,
+                            enter = fadeIn(),
+                            exit = fadeOut(),
                             modifier = Modifier
-                                .fillMaxSize()
-                                .weight(1f)
-                        )
+                                .width(380.dp)
+                                .fillMaxHeight()
+                        ) {
+                            InteractiveConsolePanel(
+                                viewModel = viewModel,
+                                activeThemePreset = activeThemePreset,
+                                screenLayout = screenLayout,
+                                parsedIntent = parsedIntent,
+                                playableUri = playableUri,
+                                errorMessage = errorMessage,
+                                onCopyLogs = {
+                                    val dump = parsedIntent?.rawDetailsDump ?: "No logs captured yet."
+                                    clipboardManager.setText(AnnotatedString(dump))
+                                },
+                                onClosePanel = { viewModel.setDebugPanelVisible(false) }
+                            )
+                        }
                     }
-
-                    // Right Side: Theme controls & telemetry log panel
-                    AnimatedVisibility(
-                        visible = showDebugPanel,
-                        enter = fadeIn(),
-                        exit = fadeOut(),
+                } else {
+                    // Bottom drawer panel overlay for standard device portrait
+                    Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
+                            .fillMaxSize()
+                            .padding(paddingValues)
                     ) {
-                        InteractiveConsolePanel(
-                            viewModel = viewModel,
-                            activeThemePreset = activeThemePreset,
-                            screenLayout = screenLayout,
-                            parsedIntent = parsedIntent,
-                            playableUri = playableUri,
-                            errorMessage = errorMessage,
-                            onCopyLogs = {
-                                val dump = parsedIntent?.rawDetailsDump ?: "No logs captured yet."
-                                clipboardManager.setText(AnnotatedString(dump))
-                            },
-                            onClosePanel = { viewModel.setDebugPanelVisible(false) }
-                        )
-                    }
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues)
-                ) {
-                    CinemaTheaterLayout(
-                        themePreset = activeThemePreset,
-                        screenLayout = screenLayout,
-                        playableUri = playableUri,
-                        errorMessage = errorMessage,
-                        headers = requestHeaders,
-                        onPlayTestVideo = { viewModel.playTestVideo() },
-                        onClearPlaySource = { viewModel.setPlayableUri(null) },
-                        onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
-                        isEditMode = isEditMode,
-                        activeAspectRatioId = activeAspectRatioId,
-                        activeResizeMode = activeResizeMode,
-                        onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
-                        isSettingsLoaded = isSettingsLoaded,
-                        onLayoutChanged = { left, top, width, height ->
-                            viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-
-                    // Bottom Panel overlay
-                    AnimatedVisibility(
-                        visible = showDebugPanel,
-                        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .fillMaxHeight(0.48f)
-                            .padding(16.dp)
-                    ) {
-                        InteractiveConsolePanel(
-                            viewModel = viewModel,
-                            activeThemePreset = activeThemePreset,
-                            screenLayout = screenLayout,
-                            parsedIntent = parsedIntent,
-                            playableUri = playableUri,
-                            errorMessage = errorMessage,
-                            onCopyLogs = {
-                                val dump = parsedIntent?.rawDetailsDump ?: "No logs captured yet."
-                                clipboardManager.setText(AnnotatedString(dump))
-                            },
-                            onClosePanel = { viewModel.setDebugPanelVisible(false) }
-                        )
+                        AnimatedVisibility(
+                            visible = showDebugPanel,
+                            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .fillMaxHeight(0.48f)
+                                .padding(16.dp)
+                        ) {
+                            InteractiveConsolePanel(
+                                viewModel = viewModel,
+                                activeThemePreset = activeThemePreset,
+                                screenLayout = screenLayout,
+                                parsedIntent = parsedIntent,
+                                playableUri = playableUri,
+                                errorMessage = errorMessage,
+                                onCopyLogs = {
+                                    val dump = parsedIntent?.rawDetailsDump ?: "No logs captured yet."
+                                    clipboardManager.setText(AnnotatedString(dump))
+                                },
+                                onClosePanel = { viewModel.setDebugPanelVisible(false) }
+                            )
+                        }
                     }
                 }
             }
@@ -352,7 +328,6 @@ fun CinemaTheaterLayout(
 
     BoxWithConstraints(
         modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
             .background(Color.Transparent)
             .onGloballyPositioned { coordinates ->
                 canvasWidthPx = coordinates.size.width.toFloat().coerceAtLeast(1f)
@@ -371,8 +346,8 @@ fun CinemaTheaterLayout(
                 .background(Color.Black.copy(alpha = screenLayout.dimAlpha))
         )
 
-        // 3. Compute the adaptive player dimensions based on target area fraction (~0.88)
-        val targetAreaFraction = 0.88f
+        // 3. Compute the adaptive player dimensions based on target area fraction (~0.96f)
+        val targetAreaFraction = 0.96f
         val aspectR = detectedRatio.coerceIn(0.3f, 3.5f) // sensible min/max bounds
 
         val targetArea = targetAreaFraction * containerAreaVal
