@@ -66,6 +66,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Default video stream URL for test playback
     val defaultTestVideoUrl = "https://sandbox-videos.web.cern.ch/record/2241796"
 
+    // IPTV States
+    private val _isIptvModeActive = MutableStateFlow(false)
+    val isIptvModeActive: StateFlow<Boolean> = _isIptvModeActive.asStateFlow()
+
+    private val _xtreamAccounts = MutableStateFlow<List<XtreamAccount>>(emptyList())
+    val xtreamAccounts: StateFlow<List<XtreamAccount>> = _xtreamAccounts.asStateFlow()
+
+    private val _m3uPlaylists = MutableStateFlow<List<M3UConfig>>(emptyList())
+    val m3uPlaylists: StateFlow<List<M3UConfig>> = _m3uPlaylists.asStateFlow()
+
+    private val _favoriteChannelIds = MutableStateFlow<Set<String>>(emptySet())
+    val favoriteChannelIds: StateFlow<Set<String>> = _favoriteChannelIds.asStateFlow()
+
+    private val _lastChannelId = MutableStateFlow<String?>(null)
+    val lastChannelId: StateFlow<String?> = _lastChannelId.asStateFlow()
+
+    private val _iptvCategories = MutableStateFlow<List<IptvCategory>>(emptyList())
+    val iptvCategories: StateFlow<List<IptvCategory>> = _iptvCategories.asStateFlow()
+
+    private val _iptvChannels = MutableStateFlow<List<IptvChannel>>(emptyList())
+    val iptvChannels: StateFlow<List<IptvChannel>> = _iptvChannels.asStateFlow()
+
+    private val _selectedCategory = MutableStateFlow<IptvCategory?>(null)
+    val selectedCategory: StateFlow<IptvCategory?> = _selectedCategory.asStateFlow()
+
+    private val _iptvSearchQuery = MutableStateFlow("")
+    val iptvSearchQuery: StateFlow<String> = _iptvSearchQuery.asStateFlow()
+
+    private val _isIptvLoading = MutableStateFlow(false)
+    val isIptvLoading: StateFlow<Boolean> = _isIptvLoading.asStateFlow()
+
+    private val _iptvErrorMessage = MutableStateFlow<String?>(null)
+    val iptvErrorMessage: StateFlow<String?> = _iptvErrorMessage.asStateFlow()
+
+    private val _epgProgrammes = MutableStateFlow<List<EpgProgramme>>(emptyList())
+    val epgProgrammes: StateFlow<List<EpgProgramme>> = _epgProgrammes.asStateFlow()
+
     // Alternative Fallback URLs for easy switching during development:
     // Fallback Sample: "http://clips.vorwaerts-gmbh.de/big_buck_bunny.mp4"
     // Fallback Sample 2 (Sintel): "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4"
@@ -109,6 +146,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     _isSettingsLoaded.value = true
                 }
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.isIptvModeActive.collect { active ->
+                _isIptvModeActive.value = active
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.xtreamAccountsJson.collect { json ->
+                _xtreamAccounts.value = deserializeAccounts(json)
+                loadActiveIptvSource()
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.m3uPlaylistsJson.collect { json ->
+                _m3uPlaylists.value = deserializeM3uConfigs(json)
+                loadActiveIptvSource()
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.favoriteChannelIds.collect { favs ->
+                _favoriteChannelIds.value = favs
+                _iptvChannels.value = _iptvChannels.value.map {
+                    it.copy(isFavorite = favs.contains(it.id))
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.lastChannelId.collect { id ->
+                _lastChannelId.value = id
             }
         }
     }
@@ -305,5 +377,321 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _errorMessage.value = "Failed to copy background image: ${e.localizedMessage}"
             }
         }
+    }
+
+    // ==========================================
+    // IPTV OPERATIONS AND UTILITIES
+    // ==========================================
+
+    fun setIptvModeActive(active: Boolean) {
+        viewModelScope.launch {
+            preferenceManager.saveIptvModeActive(active)
+        }
+    }
+
+    fun setIptvSearchQuery(query: String) {
+        _iptvSearchQuery.value = query
+    }
+
+    fun selectIptvCategory(category: IptvCategory?) {
+        _selectedCategory.value = category
+    }
+
+    fun playIptvChannel(channel: IptvChannel) {
+        setPlayableUri(channel.streamUrl)
+        viewModelScope.launch {
+            preferenceManager.saveLastChannelId(channel.id)
+        }
+        // If Xtream account active, fetch its guide details asynchronously
+        val activeXtream = _xtreamAccounts.value.find { it.isActive }
+        if (activeXtream != null) {
+            fetchXtreamEpgForChannel(channel.id)
+        }
+    }
+
+    private fun fetchXtreamEpgForChannel(streamId: String) {
+        val activeXtream = _xtreamAccounts.value.find { it.isActive } ?: return
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val eps = IptvClient.fetchXtreamShortEpg(
+                    activeXtream.serverUrl, activeXtream.username, activeXtream.password, streamId
+                )
+                // Merge into current EPG listings
+                val merged = _epgProgrammes.value.toMutableList()
+                merged.removeAll { it.channelId == streamId }
+                merged.addAll(eps)
+                _epgProgrammes.value = merged
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed updating short EPG for stream $streamId", e)
+            }
+        }
+    }
+
+    fun toggleFavoriteChannel(channelId: String) {
+        viewModelScope.launch {
+            val currentFavs = _favoriteChannelIds.value.toMutableSet()
+            if (currentFavs.contains(channelId)) {
+                currentFavs.remove(channelId)
+            } else {
+                currentFavs.add(channelId)
+            }
+            preferenceManager.saveFavoriteChannelIds(currentFavs)
+        }
+    }
+
+    // --- Account Management ---
+
+    fun addXtreamAccount(name: String, url: String, user: String, pass: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _isIptvLoading.value = true
+            _iptvErrorMessage.value = null
+            
+            val valid = IptvClient.testXtreamConnection(url, user, pass)
+            if (!valid) {
+                _iptvErrorMessage.value = "Unable to connect or invalid Xtream credentials"
+                _isIptvLoading.value = false
+                return@launch
+            }
+
+            // Deactivate others
+            val currentList = _xtreamAccounts.value.map { it.copy(isActive = false) }.toMutableList()
+            // Deactivate m3u configs too
+            val currentM3u = _m3uPlaylists.value.map { it.copy(isActive = false) }
+            preferenceManager.saveM3uPlaylistsJson(serializeM3uConfigs(currentM3u))
+
+            val newAccount = XtreamAccount(name, url, user, pass, isActive = true)
+            currentList.add(newAccount)
+            
+            preferenceManager.saveXtreamAccountsJson(serializeAccounts(currentList))
+            _isIptvLoading.value = false
+        }
+    }
+
+    fun deleteXtreamAccount(account: XtreamAccount) {
+        viewModelScope.launch {
+            val updated = _xtreamAccounts.value.filter { it.name != account.name || it.serverUrl != account.serverUrl }
+            // If deleting active, check if another should become active, or clear loading state
+            if (account.isActive && updated.isNotEmpty()) {
+                val nextActive = updated.first().copy(isActive = true)
+                val newUpdated = updated.map { if (it.name == nextActive.name && it.serverUrl == nextActive.serverUrl) nextActive else it }
+                preferenceManager.saveXtreamAccountsJson(serializeAccounts(newUpdated))
+            } else {
+                preferenceManager.saveXtreamAccountsJson(if (updated.isEmpty()) null else serializeAccounts(updated))
+            }
+        }
+    }
+
+    fun selectXtreamAccount(account: XtreamAccount) {
+        viewModelScope.launch {
+            // Set this account as active, mark others inactive
+            val updated = _xtreamAccounts.value.map {
+                it.copy(isActive = (it.name == account.name && it.serverUrl == account.serverUrl))
+            }
+            // Deactivate M3Us
+            val updatedM3u = _m3uPlaylists.value.map { it.copy(isActive = false) }
+            
+            preferenceManager.saveM3uPlaylistsJson(serializeM3uConfigs(updatedM3u))
+            preferenceManager.saveXtreamAccountsJson(serializeAccounts(updated))
+        }
+    }
+
+    // --- M3U / Playlist Management ---
+
+    fun addM3uPlaylist(name: String, playlistUrl: String, epgUrl: String?) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _isIptvLoading.value = true
+            _iptvErrorMessage.value = null
+
+            try {
+                // Test stream load
+                IptvClient.fetchUrlStream(playlistUrl).use { /* test stream opens */ }
+                
+                // Deactivate others
+                val currentM3uList = _m3uPlaylists.value.map { it.copy(isActive = false) }.toMutableList()
+                val currentXtream = _xtreamAccounts.value.map { it.copy(isActive = false) }
+                preferenceManager.saveXtreamAccountsJson(serializeAccounts(currentXtream))
+
+                val newConfig = M3UConfig(name, playlistUrl, epgUrl, isActive = true)
+                currentM3uList.add(newConfig)
+
+                preferenceManager.saveM3uPlaylistsJson(serializeM3uConfigs(currentM3uList))
+            } catch (e: Exception) {
+                _iptvErrorMessage.value = "M3U file check failed: ${e.localizedMessage}"
+            } finally {
+                _isIptvLoading.value = false
+            }
+        }
+    }
+
+    fun deleteM3uPlaylist(config: M3UConfig) {
+        viewModelScope.launch {
+            val updated = _m3uPlaylists.value.filter { it.name != config.name || it.playlistUrl != config.playlistUrl }
+            if (config.isActive && updated.isNotEmpty()) {
+                val nextActive = updated.first().copy(isActive = true)
+                val newUpdated = updated.map { if (it.name == nextActive.name && it.playlistUrl == nextActive.playlistUrl) nextActive else it }
+                preferenceManager.saveM3uPlaylistsJson(serializeM3uConfigs(newUpdated))
+            } else {
+                preferenceManager.saveM3uPlaylistsJson(if (updated.isEmpty()) null else serializeM3uConfigs(updated))
+            }
+        }
+    }
+
+    fun selectM3uPlaylist(config: M3UConfig) {
+        viewModelScope.launch {
+            val updated = _m3uPlaylists.value.map {
+                it.copy(isActive = (it.name == config.name && it.playlistUrl == config.playlistUrl))
+            }
+            val updatedXtream = _xtreamAccounts.value.map { it.copy(isActive = false) }
+            
+            preferenceManager.saveXtreamAccountsJson(serializeAccounts(updatedXtream))
+            preferenceManager.saveM3uPlaylistsJson(serializeM3uConfigs(updated))
+        }
+    }
+
+    // --- Loading channels engine ---
+
+    fun loadActiveIptvSource() {
+        val activeXtream = _xtreamAccounts.value.find { it.isActive }
+        val activeM3u = _m3uPlaylists.value.find { it.isActive }
+
+        if (activeXtream == null && activeM3u == null) {
+            _iptvCategories.value = emptyList()
+            _iptvChannels.value = emptyList()
+            _selectedCategory.value = null
+            _epgProgrammes.value = emptyList()
+            return
+        }
+
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _isIptvLoading.value = true
+            _iptvErrorMessage.value = null
+
+            try {
+                if (activeXtream != null) {
+                    val cats = IptvClient.fetchXtreamCategories(
+                        activeXtream.serverUrl, activeXtream.username, activeXtream.password
+                    )
+                    val rawChannels = IptvClient.fetchXtreamChannels(
+                        activeXtream.serverUrl, activeXtream.username, activeXtream.password
+                    )
+                    val favorites = _favoriteChannelIds.value
+                    val channels = rawChannels.map { it.copy(isFavorite = favorites.contains(it.id)) }
+
+                    _iptvCategories.value = cats
+                    _iptvChannels.value = channels
+                    
+                    val currentCategory = _selectedCategory.value
+                    if (currentCategory == null || !cats.any { it.id == currentCategory.id }) {
+                        _selectedCategory.value = cats.firstOrNull()
+                    }
+                } else if (activeM3u != null) {
+                    IptvClient.fetchUrlStream(activeM3u.playlistUrl).use { stream ->
+                        val (cats, rawChannels) = IptvParser.parseM3u(stream)
+                        val favorites = _favoriteChannelIds.value
+                        val channels = rawChannels.map { it.copy(isFavorite = favorites.contains(it.id)) }
+
+                        _iptvCategories.value = cats
+                        _iptvChannels.value = channels
+                        
+                        val currentCategory = _selectedCategory.value
+                        if (currentCategory == null || !cats.any { it.id == currentCategory.id }) {
+                            _selectedCategory.value = cats.firstOrNull()
+                        }
+
+                        // Load XMLTV EPG
+                        val xmltvUrl = activeM3u.epgUrl
+                        if (!xmltvUrl.isNullOrBlank()) {
+                            try {
+                                IptvClient.fetchUrlStream(xmltvUrl).use { xmlStream ->
+                                    val eps = IptvParser.parseXmltv(xmlStream)
+                                    _epgProgrammes.value = eps
+                                }
+                            } catch (epgEx: Exception) {
+                                Log.e(TAG, "XMLTV background EPG load failure", epgEx)
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "IPTV channel initialization stream error", e)
+                _iptvErrorMessage.value = "Stream source error: ${e.localizedMessage}"
+            } finally {
+                _isIptvLoading.value = false
+            }
+        }
+    }
+
+    // --- JSON Converters ---
+
+    private fun serializeAccounts(accounts: List<XtreamAccount>): String {
+        val arr = org.json.JSONArray()
+        for (acc in accounts) {
+            val obj = org.json.JSONObject()
+            obj.put("name", acc.name)
+            obj.put("serverUrl", acc.serverUrl)
+            obj.put("username", acc.username)
+            obj.put("password", acc.password)
+            obj.put("isActive", acc.isActive)
+            arr.put(obj)
+        }
+        return arr.toString()
+    }
+
+    private fun deserializeAccounts(json: String?): List<XtreamAccount> {
+        if (json.isNullOrBlank()) return emptyList()
+        val list = mutableListOf<XtreamAccount>()
+        try {
+            val arr = org.json.JSONArray(json)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    XtreamAccount(
+                        name = obj.getString("name"),
+                        serverUrl = obj.getString("serverUrl"),
+                        username = obj.getString("username"),
+                        password = obj.getString("password"),
+                        isActive = obj.optBoolean("isActive", false)
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Converter accounts error", e)
+        }
+        return list
+    }
+
+    private fun serializeM3uConfigs(configs: List<M3UConfig>): String {
+        val arr = org.json.JSONArray()
+        for (cfg in configs) {
+            val obj = org.json.JSONObject()
+            obj.put("name", cfg.name)
+            obj.put("playlistUrl", cfg.playlistUrl)
+            obj.put("epgUrl", cfg.epgUrl ?: "")
+            obj.put("isActive", cfg.isActive)
+            arr.put(obj)
+        }
+        return arr.toString()
+    }
+
+    private fun deserializeM3uConfigs(json: String?): List<M3UConfig> {
+        if (json.isNullOrBlank()) return emptyList()
+        val list = mutableListOf<M3UConfig>()
+        try {
+            val arr = org.json.JSONArray(json)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    M3UConfig(
+                        name = obj.getString("name"),
+                        playlistUrl = obj.getString("playlistUrl"),
+                        epgUrl = obj.optString("epgUrl").takeIf { it.isNotBlank() },
+                        isActive = obj.optBoolean("isActive", false)
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Converter playlists error", e)
+        }
+        return list
     }
 }

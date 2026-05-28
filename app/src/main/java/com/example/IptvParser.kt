@@ -1,0 +1,219 @@
+package com.example
+
+import android.util.Log
+import android.util.Xml
+import org.xmlpull.v1.XmlPullParser
+import java.io.BufferedReader
+import java.io.InputStream
+import java.io.StringReader
+import java.util.Calendar
+import java.util.TimeZone
+
+object IptvParser {
+    private const val TAG = "IptvParser"
+
+    /**
+     * Parses an M3U playlist from an InputStream (either raw or downloaded).
+     * Returns a pair of categories and live channels.
+     */
+    fun parseM3u(inputStream: InputStream): Pair<List<IptvCategory>, List<IptvChannel>> {
+        val channels = mutableListOf<IptvChannel>()
+        val categoriesSet = mutableSetOf<String>()
+
+        try {
+            inputStream.bufferedReader().useLines { lines ->
+                var currentChannelName = ""
+                var currentLogoUrl: String? = null
+                var currentCategory = "Uncategorized"
+                var currentEpgId: String? = null
+                var currentChannelId: String? = null
+
+                lines.forEach { line ->
+                    val trimmed = line.trim()
+                    if (trimmed.startsWith("#EXTINF:")) {
+                        // Reset line details
+                        currentChannelName = ""
+                        currentLogoUrl = null
+                        currentCategory = "Uncategorized"
+                        currentEpgId = null
+                        currentChannelId = null
+
+                        // Parse attributes, e.g., #EXTINF:-1 tvg-id="CNN" tvg-name="CNN US" tvg-logo="url" group-title="News",CNN US
+                        val infoPart = trimmed.substringAfter("#EXTINF:")
+                        val commaIdx = infoPart.lastIndexOf(',')
+                        currentChannelName = if (commaIdx != -1) {
+                            infoPart.substring(commaIdx + 1).trim()
+                        } else {
+                            "Unknown Channel"
+                        }
+
+                        // Regex to parse key-value attributes like tvg-id="foo" or group-title="bar"
+                        val metaPart = if (commaIdx != -1) infoPart.substring(0, commaIdx) else infoPart
+
+                        // Extract specific elements with helper
+                        currentEpgId = extractAttribute(metaPart, "tvg-id")
+                        val tvgName = extractAttribute(metaPart, "tvg-name")
+                        currentLogoUrl = extractAttribute(metaPart, "tvg-logo") ?: extractAttribute(metaPart, "tvg-screenshot")
+                        
+                        val categoryMatch = extractAttribute(metaPart, "group-title")
+                        if (categoryMatch != null && categoryMatch.isNotBlank()) {
+                            currentCategory = categoryMatch
+                        }
+                        
+                        if (currentEpgId.isNullOrBlank()) {
+                            currentEpgId = tvgName ?: currentChannelName
+                        }
+                        
+                        // Fallback channel unique ID
+                        currentChannelId = extractAttribute(metaPart, "channel-id") ?: currentEpgId
+                    } else if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("rtmp://")) {
+                        val streamUrl = trimmed
+                        val finalId = currentChannelId ?: java.util.UUID.nameUUIDFromBytes(streamUrl.toByteArray()).toString()
+                        
+                        categoriesSet.add(currentCategory)
+                        channels.add(
+                            IptvChannel(
+                                id = finalId,
+                                name = if (currentChannelName.isNotBlank()) currentChannelName else "Channel ${channels.size + 1}",
+                                logoUrl = currentLogoUrl,
+                                streamUrl = streamUrl,
+                                categoryId = currentCategory,
+                                epgId = currentEpgId,
+                                isFavorite = false
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing M3U list", e)
+        }
+
+        val categories = categoriesSet.map { name ->
+            IptvCategory(id = name, name = name, type = "live")
+        }.sortedBy { it.name }
+
+        return Pair(categories, channels)
+    }
+
+    private fun extractAttribute(source: String, attrName: String): String? {
+        val pattern = """$attrName\s*=\s*"([^"]*)"""".toRegex(RegexOption.IGNORE_CASE)
+        val match = pattern.find(source)
+        if (match != null) {
+            return match.groupValues[1].trim()
+        }
+        val patternNoQuotes = """$attrName\s*=\s*([^,\s]*)""".toRegex(RegexOption.IGNORE_CASE)
+        val matchNoQuotes = patternNoQuotes.find(source)
+        return matchNoQuotes?.groupValues[1]?.trim()
+    }
+
+    /**
+     * Parses an XMLTV XML file.
+     * Returns a list of parsed EPG programmes.
+     */
+    fun parseXmltv(inputStream: InputStream): List<EpgProgramme> {
+        val programmes = mutableListOf<EpgProgramme>()
+        val parser = Xml.newPullParser()
+        try {
+            parser.setInput(inputStream, "UTF-8")
+            var eventType = parser.eventType
+            
+            var currentChannelId: String? = null
+            var startTimeStr: String? = null
+            var endTimeStr: String? = null
+            var title: String? = null
+            var desc: String? = null
+
+            // We only keep programmes for current and brief upcoming days
+            val thresholdTime = System.currentTimeMillis() - 4 * 3600 * 1000 // Keep past 4 hours
+
+            while (eventType != XmlPullParser.END_DOCUMENT) {
+                val name = parser.name
+                when (eventType) {
+                    XmlPullParser.START_TAG -> {
+                        if (name == "programme") {
+                            currentChannelId = parser.getAttributeValue(null, "channel")
+                            startTimeStr = parser.getAttributeValue(null, "start")
+                            endTimeStr = parser.getAttributeValue(null, "stop")
+                            title = null
+                            desc = null
+                        } else if (name == "title" && currentChannelId != null) {
+                            title = parser.nextText()
+                        } else if (name == "desc" && currentChannelId != null) {
+                            desc = parser.nextText()
+                        }
+                    }
+                    XmlPullParser.END_TAG -> {
+                        if (name == "programme") {
+                            if (currentChannelId != null && title != null && startTimeStr != null && endTimeStr != null) {
+                                val startMs = parseXmltvDate(startTimeStr)
+                                val endMs = parseXmltvDate(endTimeStr)
+                                
+                                if (endMs > thresholdTime) { // Filter old schedules to avoid OOM
+                                    programmes.add(
+                                        EpgProgramme(
+                                            channelId = currentChannelId,
+                                            title = title,
+                                            startMs = startMs,
+                                            endMs = endMs,
+                                            description = desc
+                                        )
+                                    )
+                                }
+                            }
+                            currentChannelId = null
+                            startTimeStr = null
+                            endTimeStr = null
+                            title = null
+                            desc = null
+                        }
+                    }
+                }
+                eventType = parser.next()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing XMLTV EPG", e)
+        }
+        return programmes
+    }
+
+    /**
+     * Parse XMLTV formatted dates: 20260528070000 +0000 or 20260528070000
+     */
+    fun parseXmltvDate(dateStr: String): Long {
+        try {
+            val cleanStr = dateStr.trim().replace("\\s+".toRegex(), " ")
+            val parts = cleanStr.split(" ")
+            val mainPart = parts[0] // "20260528070000"
+            
+            if (mainPart.length < 8) return System.currentTimeMillis()
+
+            val year = mainPart.substring(0, 4).toInt()
+            val month = mainPart.substring(4, 6).toInt()
+            val day = mainPart.substring(6, 8).toInt()
+            val hour = if (mainPart.length >= 10) mainPart.substring(8, 10).toInt() else 0
+            val minute = if (mainPart.length >= 12) mainPart.substring(10, 12).toInt() else 0
+            val second = if (mainPart.length >= 14) mainPart.substring(12, 14).toInt() else 0
+            
+            val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+            calendar.set(year, month - 1, day, hour, minute, second)
+            calendar.set(Calendar.MILLISECOND, 0)
+            
+            var timeMs = calendar.timeInMillis
+            
+            if (parts.size > 1) {
+                val offsetPart = parts[1] // "+0000" or "-0500"
+                if (offsetPart.length == 5 && (offsetPart.startsWith("+") || offsetPart.startsWith("-"))) {
+                    val sign = if (offsetPart.startsWith("+")) 1 else -1
+                    val hoursOffset = offsetPart.substring(1, 3).toInt()
+                    val minutesOffset = offsetPart.substring(3, 5).toInt()
+                    val totalOffsetMs = (hoursOffset * 3600 + minutesOffset * 60) * 1000L * sign
+                    timeMs -= totalOffsetMs // Normalize back to UTC epoch
+                }
+            }
+            return timeMs
+        } catch (e: Exception) {
+            return System.currentTimeMillis()
+        }
+    }
+}

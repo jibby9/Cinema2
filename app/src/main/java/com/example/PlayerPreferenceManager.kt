@@ -44,6 +44,90 @@ class PlayerPreferenceManager(private val context: Context) {
         val KEY_CUSTOM_HEIGHT = floatPreferencesKey("custom_height")
         val KEY_CUSTOM_DIM = floatPreferencesKey("custom_dim_alpha")
         val KEY_CUSTOM_BACKGROUND_URI = stringPreferencesKey("custom_background_uri")
+
+        // IPTV Settings
+        val KEY_IPTV_MODE_ACTIVE = booleanPreferencesKey("iptv_mode_active")
+        val KEY_IPTV_XTREAM_ACCOUNTS_JSON = stringPreferencesKey("iptv_xtream_accounts_json")
+        val KEY_IPTV_M3U_PLAYLISTS_JSON = stringPreferencesKey("iptv_m3u_playlists_json")
+        val KEY_IPTV_FAVORITES = stringSetPreferencesKey("iptv_favorites")
+        val KEY_IPTV_LAST_CHANNEL_ID = stringPreferencesKey("iptv_last_channel_id")
+    }
+
+    /**
+     * IPTV: Check if IPTV mode is active instead of the default external player dashboard
+     */
+    val isIptvModeActive: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_IPTV_MODE_ACTIVE] ?: false
+    }
+
+    suspend fun saveIptvModeActive(active: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_IPTV_MODE_ACTIVE] = active
+        }
+    }
+
+    /**
+     * IPTV: Saved Xtream accounts JSON string representation
+     */
+    val xtreamAccountsJson: Flow<String?> = context.dataStore.data.map { preferences ->
+        preferences[KEY_IPTV_XTREAM_ACCOUNTS_JSON]
+    }
+
+    suspend fun saveXtreamAccountsJson(jsonString: String?) {
+        context.dataStore.edit { preferences ->
+            if (jsonString == null) {
+                preferences.remove(KEY_IPTV_XTREAM_ACCOUNTS_JSON)
+            } else {
+                preferences[KEY_IPTV_XTREAM_ACCOUNTS_JSON] = jsonString
+            }
+        }
+    }
+
+    /**
+     * IPTV: Saved M3U playlists JSON string representation
+     */
+    val m3uPlaylistsJson: Flow<String?> = context.dataStore.data.map { preferences ->
+        preferences[KEY_IPTV_M3U_PLAYLISTS_JSON]
+    }
+
+    suspend fun saveM3uPlaylistsJson(jsonString: String?) {
+        context.dataStore.edit { preferences ->
+            if (jsonString == null) {
+                preferences.remove(KEY_IPTV_M3U_PLAYLISTS_JSON)
+            } else {
+                preferences[KEY_IPTV_M3U_PLAYLISTS_JSON] = jsonString
+            }
+        }
+    }
+
+    /**
+     * IPTV: Favorite channel IDs
+     */
+    val favoriteChannelIds: Flow<Set<String>> = context.dataStore.data.map { preferences ->
+        preferences[KEY_IPTV_FAVORITES] ?: emptySet()
+    }
+
+    suspend fun saveFavoriteChannelIds(favorites: Set<String>) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_IPTV_FAVORITES] = favorites
+        }
+    }
+
+    /**
+     * IPTV: Last played channel ID
+     */
+    val lastChannelId: Flow<String?> = context.dataStore.data.map { preferences ->
+        preferences[KEY_IPTV_LAST_CHANNEL_ID]
+    }
+
+    suspend fun saveLastChannelId(channelId: String?) {
+        context.dataStore.edit { preferences ->
+            if (channelId == null) {
+                preferences.remove(KEY_IPTV_LAST_CHANNEL_ID)
+            } else {
+                preferences[KEY_IPTV_LAST_CHANNEL_ID] = channelId
+            }
+        }
     }
 
     /**

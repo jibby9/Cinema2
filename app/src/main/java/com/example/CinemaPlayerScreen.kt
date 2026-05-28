@@ -7,6 +7,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
@@ -72,6 +73,9 @@ fun CinemaPlayerScreen(
     val activeResizeMode by viewModel.activeResizeMode.collectAsState()
     val isSettingsLoaded by viewModel.isSettingsLoaded.collectAsState()
 
+    // IPTV state collection
+    val isIptvModeActive by viewModel.isIptvModeActive.collectAsState()
+
     val clipboardManager = LocalClipboardManager.current
     val configuration = LocalConfiguration.current
     val customBackgroundUri by viewModel.customBgUri.collectAsState()
@@ -99,7 +103,9 @@ fun CinemaPlayerScreen(
                     onToggleDebug = { viewModel.toggleDebugPanel() },
                     showDebugPanel = showDebugPanel,
                     isFoldableActive = isExpandedLayout,
-                    activeThemeName = activeThemePreset.name
+                    activeThemeName = activeThemePreset.name,
+                    isIptvActive = isIptvModeActive,
+                    onToggleIptv = { viewModel.setIptvModeActive(it) }
                 )
             }
         ) { paddingValues ->
@@ -146,23 +152,38 @@ fun CinemaPlayerScreen(
                                 .width(380.dp)
                                 .fillMaxHeight()
                         ) {
-                            InteractiveConsolePanel(
-                                viewModel = viewModel,
-                                activeThemePreset = activeThemePreset,
-                                screenLayout = screenLayout,
-                                parsedIntent = parsedIntent,
-                                playableUri = playableUri,
-                                errorMessage = errorMessage,
-                                onCopyLogs = {
-                                    val dump = parsedIntent?.rawDetailsDump ?: "No logs captured yet."
-                                    clipboardManager.setText(AnnotatedString(dump))
-                                },
-                                onClosePanel = { viewModel.setDebugPanelVisible(false) }
-                            )
+                            if (isIptvModeActive) {
+                                Card(
+                                    modifier = Modifier.fillMaxSize(),
+                                    shape = RoundedCornerShape(24.dp),
+                                    colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+                                ) {
+                                    IptvDashboard(
+                                        viewModel = viewModel,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                            } else {
+                                InteractiveConsolePanel(
+                                    viewModel = viewModel,
+                                    activeThemePreset = activeThemePreset,
+                                    screenLayout = screenLayout,
+                                    parsedIntent = parsedIntent,
+                                    playableUri = playableUri,
+                                    errorMessage = errorMessage,
+                                    onCopyLogs = {
+                                        val dump = parsedIntent?.rawDetailsDump ?: "No logs captured yet."
+                                        clipboardManager.setText(AnnotatedString(dump))
+                                    },
+                                    onClosePanel = { viewModel.setDebugPanelVisible(false) }
+                                )
+                            }
                         }
                     }
                 } else {
                     // Bottom drawer panel overlay for standard device portrait
+                    val activeHeightFraction = if (isIptvModeActive) 0.65f else 0.48f
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -175,22 +196,36 @@ fun CinemaPlayerScreen(
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
                                 .fillMaxWidth()
-                                .fillMaxHeight(0.48f)
+                                .fillMaxHeight(activeHeightFraction)
                                 .padding(16.dp)
                         ) {
-                            InteractiveConsolePanel(
-                                viewModel = viewModel,
-                                activeThemePreset = activeThemePreset,
-                                screenLayout = screenLayout,
-                                parsedIntent = parsedIntent,
-                                playableUri = playableUri,
-                                errorMessage = errorMessage,
-                                onCopyLogs = {
-                                    val dump = parsedIntent?.rawDetailsDump ?: "No logs captured yet."
-                                    clipboardManager.setText(AnnotatedString(dump))
-                                },
-                                onClosePanel = { viewModel.setDebugPanelVisible(false) }
-                            )
+                            if (isIptvModeActive) {
+                                Card(
+                                    modifier = Modifier.fillMaxSize(),
+                                    shape = RoundedCornerShape(24.dp),
+                                    colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+                                ) {
+                                    IptvDashboard(
+                                        viewModel = viewModel,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                            } else {
+                                InteractiveConsolePanel(
+                                    viewModel = viewModel,
+                                    activeThemePreset = activeThemePreset,
+                                    screenLayout = screenLayout,
+                                    parsedIntent = parsedIntent,
+                                    playableUri = playableUri,
+                                    errorMessage = errorMessage,
+                                    onCopyLogs = {
+                                        val dump = parsedIntent?.rawDetailsDump ?: "No logs captured yet."
+                                        clipboardManager.setText(AnnotatedString(dump))
+                                    },
+                                    onClosePanel = { viewModel.setDebugPanelVisible(false) }
+                                )
+                            }
                         }
                     }
                 }
@@ -208,7 +243,9 @@ fun CinemaTitleBar(
     onToggleDebug: () -> Unit,
     showDebugPanel: Boolean,
     isFoldableActive: Boolean,
-    activeThemeName: String
+    activeThemeName: String,
+    isIptvActive: Boolean,
+    onToggleIptv: (Boolean) -> Unit
 ) {
     CenterAlignedTopAppBar(
         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -224,12 +261,12 @@ fun CinemaTitleBar(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(IndigoSecondary)
+                        .background(if (isIptvActive) IndigoPrimary else IndigoSecondary)
                         .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PlayArrow,
+                        imageVector = if (isIptvActive) Icons.Default.Tv else Icons.Default.PlayArrow,
                         contentDescription = null,
                         tint = Color.White,
                         modifier = Modifier.size(20.dp)
@@ -238,7 +275,7 @@ fun CinemaTitleBar(
 
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "Cinema Player",
+                        text = if (isIptvActive) "Cinema IPTV Live" else "Cinema Player",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.SemiBold,
                             letterSpacing = (-0.5).sp,
@@ -246,7 +283,7 @@ fun CinemaTitleBar(
                         )
                     )
                     Text(
-                        text = "Theme: $activeThemeName",
+                        text = if (isIptvActive) "Built-in IPTV Engine" else "Theme: $activeThemeName",
                         color = Color.LightGray.copy(alpha = 0.6f),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Normal
@@ -255,6 +292,25 @@ fun CinemaTitleBar(
             }
         },
         actions = {
+            // IPTV Live Client Quick Toggle Selector
+            IconButton(
+                onClick = { 
+                    onToggleIptv(!isIptvActive)
+                    // If turning on, ensure panel is visible to browse streams
+                    if (!isIptvActive && !showDebugPanel) {
+                        onToggleDebug()
+                    }
+                },
+                modifier = Modifier.testTag("iptv_mode_toggle_btn")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Tv,
+                    contentDescription = "Toggle IPTV Mode",
+                    tint = if (isIptvActive) IndigoPrimary else Color.LightGray,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
             Box(
                 modifier = Modifier
                     .padding(end = 4.dp)
