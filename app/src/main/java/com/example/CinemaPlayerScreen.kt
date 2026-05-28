@@ -371,8 +371,8 @@ fun CinemaTheaterLayout(
                 .background(Color.Black.copy(alpha = screenLayout.dimAlpha))
         )
 
-        // 3. Compute the adaptive player dimensions based on target area fraction (~0.80)
-        val targetAreaFraction = 0.80f
+        // 3. Compute the adaptive player dimensions based on target area fraction (~0.88)
+        val targetAreaFraction = 0.88f
         val aspectR = detectedRatio.coerceIn(0.3f, 3.5f) // sensible min/max bounds
 
         val targetArea = targetAreaFraction * containerAreaVal
@@ -487,14 +487,14 @@ fun CinemaTheaterLayout(
                     val glowCol = themePreset.glowColor
                     val shadowFactor = themePreset.shadowIntensity
                     
-                    // Immersive drop-glow behind the video stream
+                    // Immersive drop-glow behind the video stream (reduced spread and intensity)
                     if (glowRadius > 0f) {
-                        val passes = 6
+                        val passes = 4
                         for (i in 1..passes) {
-                            val scale = 1.0f + (i * 0.03f * (glowRadius / 20f))
+                            val scale = 1.0f + (i * 0.015f * (glowRadius / 20f))
                             val alphaFactor = (passes - i + 1).toFloat() / passes
                             drawRoundRect(
-                                color = glowCol.copy(alpha = glowCol.alpha * alphaFactor * shadowFactor),
+                                color = glowCol.copy(alpha = glowCol.alpha * alphaFactor * shadowFactor * 0.65f),
                                 topLeft = androidx.compose.ui.geometry.Offset(
                                     -(size.width * (scale - 1f) / 2f),
                                     -(size.height * (scale - 1f) / 2f)

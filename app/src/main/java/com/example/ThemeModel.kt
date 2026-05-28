@@ -61,9 +61,9 @@ object ThemePresets {
         cornerRadiusDp = 8,
         frameThicknessDp = 6,
         frameColor = Color(0xFF0C0A09), // Matte black
-        glowColor = Color(0x736366F1), // Soft blue glow
-        glowRadiusDp = 24,
-        shadowIntensity = 0.8f,
+        glowColor = Color(0x3B6366F1), // Subtly reduced alpha (approx 23%)
+        glowRadiusDp = 10, // Noticeably smaller glow radius
+        shadowIntensity = 0.4f, // Reduced intensity
         vignetteStrength = 0.7f,
         ambientColorTint = Color(0x1A4F46E5) // Soft Indigo projector tint
     )
@@ -83,9 +83,9 @@ object ThemePresets {
         cornerRadiusDp = 16,
         frameThicknessDp = 10,
         frameColor = Color(0xFF451A03), // Warm wooden timber frame
-        glowColor = Color(0x60F97316), // Soft warm amber fire glow
-        glowRadiusDp = 30,
-        shadowIntensity = 0.6f,
+        glowColor = Color(0x33F97316), // Subtly reduced alpha (20%)
+        glowRadiusDp = 12, // Noticeably smaller glow radius
+        shadowIntensity = 0.35f, // Reduced intensity
         vignetteStrength = 0.5f,
         ambientColorTint = Color(0x1F7C2D12) // Warm brown amber tint
     )
@@ -105,9 +105,9 @@ object ThemePresets {
         cornerRadiusDp = 4,
         frameThicknessDp = 8,
         frameColor = Color(0xFF1E293B), // Sleek metal frame
-        glowColor = Color(0x6010B981), // Emerald floodlight glow
-        glowRadiusDp = 18,
-        shadowIntensity = 0.4f,
+        glowColor = Color(0x2E10B981), // Subtly reduced alpha (18%)
+        glowRadiusDp = 8, // Noticeably smaller glow radius
+        shadowIntensity = 0.25f, // Reduced intensity
         vignetteStrength = 0.3f,
         ambientColorTint = Color(0x1534D399) // Cool green stadium tint
     )
