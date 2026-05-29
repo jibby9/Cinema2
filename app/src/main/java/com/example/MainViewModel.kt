@@ -235,6 +235,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val TAG = "MainViewModel"
 
     init {
+        updateLastRefreshTime()
         // Load custom themes from storage at VM start
         try {
             val loadedCustomThemes = CustomThemePersistence.loadThemes(application)
@@ -1372,9 +1373,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun saveEpgToLocalCache(programmes: List<EpgProgramme>) {
+    private val _lastEpgRefreshTime = MutableStateFlow<Long>(0L)
+    val lastEpgRefreshTime: StateFlow<Long> = _lastEpgRefreshTime.asStateFlow()
+
+    fun updateLastRefreshTime() {
+        _lastEpgRefreshTime.value = EpgRefreshManager.getLastRefreshTimeGlobal(getApplication())
+    }
+
+    fun onAppReturnedToForeground() {
+        viewModelScope.launch {
+            Log.d(TAG, "onAppReturnedToForeground triggered")
+            // Immediate warm restore from local cache (handles other sources background refreshed)
+            val sourceId = getActiveSourceId()
+            if (sourceId != null) {
+                val cached = loadEpgFromLocalCache(sourceId)
+                if (cached.isNotEmpty()) {
+                    _epgProgrammes.value = cached
+                }
+            }
+            updateLastRefreshTime()
+
+            // Trigger actual network refresh (this obeys internal 15-minute throttle)
+            val success = EpgRefreshManager.refreshAllEpgSources(getApplication(), force = false)
+            if (success) {
+                val activeId = getActiveSourceId()
+                if (activeId != null) {
+                    val updatedCached = loadEpgFromLocalCache(activeId)
+                    _epgProgrammes.value = updatedCached
+                }
+                updateLastRefreshTime()
+            }
+        }
+    }
+
+    private fun saveEpgToLocalCache(programmes: List<EpgProgramme>, sourceId: String? = null) {
         try {
-            val file = java.io.File(getApplication<Application>().cacheDir, "epg_cache.json")
+            val id = sourceId ?: getActiveSourceId() ?: "default"
+            val file = java.io.File(getApplication<Application>().cacheDir, "epg_cache_$id.json")
             val arr = org.json.JSONArray()
             for (p in programmes) {
                 val obj = org.json.JSONObject()
@@ -1386,16 +1421,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 arr.put(obj)
             }
             file.writeText(arr.toString())
-            Log.d(TAG, "Saved EPG local cache directory: ${programmes.size} records saved.")
+            Log.d(TAG, "Saved EPG local cache for $id: ${programmes.size} records saved.")
+
+            // Legacy fallback syncing
+            val legacyFile = java.io.File(getApplication<Application>().cacheDir, "epg_cache.json")
+            legacyFile.writeText(arr.toString())
         } catch (e: Exception) {
             Log.e(TAG, "Failed writing EPG to local storage cache", e)
         }
     }
 
-    private fun loadEpgFromLocalCache(): List<EpgProgramme> {
+    private fun loadEpgFromLocalCache(sourceId: String? = null): List<EpgProgramme> {
         val list = mutableListOf<EpgProgramme>()
         try {
-            val file = java.io.File(getApplication<Application>().cacheDir, "epg_cache.json")
+            val id = sourceId ?: getActiveSourceId() ?: "default"
+            var file = java.io.File(getApplication<Application>().cacheDir, "epg_cache_$id.json")
+            if (!file.exists()) {
+                file = java.io.File(getApplication<Application>().cacheDir, "epg_cache.json")
+            }
             if (file.exists()) {
                 val json = file.readText()
                 val arr = org.json.JSONArray(json)
@@ -1411,7 +1454,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     )
                 }
-                Log.d(TAG, "Loaded EPG from local storage cache: ${list.size} records.")
+                Log.d(TAG, "Loaded EPG from local storage cache for $id: ${list.size} records.")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed fetching cached EPG lists", e)
@@ -1466,6 +1509,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (loaded.isNotEmpty()) {
                     _epgProgrammes.value = loaded
                     saveEpgToLocalCache(loaded)
+                    EpgRefreshManager.setLastRefreshTimeGlobal(getApplication(), System.currentTimeMillis())
+                    val activeId = getActiveSourceId()
+                    if (activeId != null) {
+                        EpgRefreshManager.setLastRefreshTimeForSource(getApplication(), activeId, System.currentTimeMillis())
+                    }
+                    updateLastRefreshTime()
                     _epgLoadStatus.value = "EPG Reloaded successfully! (${loaded.size} shows loaded)"
                 } else {
                     _epgLoadStatus.value = "Reload completed: No scheduling records recovered."

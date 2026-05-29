@@ -7,6 +7,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.ViewModelProvider
 import com.example.ui.theme.MyApplicationTheme
 
@@ -19,6 +22,15 @@ class MainActivity : ComponentActivity() {
 
         // Initialize the MainViewModel
         viewModel = ViewModelProvider(this)[MainViewModel::class.java]
+
+        // Observe application lifecycle to trigger EPG refresh on foregrounding
+        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) {
+                super.onStart(owner)
+                android.util.Log.d("MainActivity", "App returned to foreground. Refurbishing EPG records.")
+                viewModel.onAppReturnedToForeground()
+            }
+        })
 
         // Parse initial launch intent
         viewModel.handleIntent(intent)

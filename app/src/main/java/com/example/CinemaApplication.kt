@@ -14,6 +14,12 @@ class CinemaApplication : Application() {
         super.onCreate()
         instance = this
 
+        try {
+            EpgRefreshManager.schedulePeriodicRefresh(this)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed scheduling background EPG refresh worker", e)
+        }
+
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             Log.e(TAG, "Uncaught exception caught globally on thread: ${thread.name}", throwable)

@@ -272,7 +272,30 @@ fun CinemaPlayerScreen(
                         .padding(paddingValues),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Left Pane: Cinema Player Container
+                    // Left Pane: Immersive TV Guide/Dashboard side-panel
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = showDebugPanel,
+                        enter = androidx.compose.animation.slideInHorizontally(initialOffsetX = { -it }) + androidx.compose.animation.fadeIn(),
+                        exit = androidx.compose.animation.slideOutHorizontally(targetOffsetX = { -it }) + androidx.compose.animation.fadeOut(),
+                        modifier = Modifier
+                            .weight(0.42f)
+                            .fillMaxHeight()
+                            .padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 16.dp)
+                    ) {
+                        Card(
+                            modifier = Modifier.fillMaxSize(),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+                        ) {
+                            IptvDashboard(
+                                viewModel = viewModel,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+
+                    // Right Pane: Cinema Player Container
                     Box(
                         modifier = Modifier
                             .weight(if (showDebugPanel) 0.58f else 1f)
@@ -313,29 +336,6 @@ fun CinemaPlayerScreen(
                             onSelectTheme = { id -> viewModel.selectTheme(id) },
                             modifier = Modifier.fillMaxSize()
                         )
-                    }
-
-                    // Right Pane: Immersive TV Guide/Dashboard side-panel
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = showDebugPanel,
-                        enter = androidx.compose.animation.slideInHorizontally(initialOffsetX = { it }) + androidx.compose.animation.fadeIn(),
-                        exit = androidx.compose.animation.slideOutHorizontally(targetOffsetX = { it }) + androidx.compose.animation.fadeOut(),
-                        modifier = Modifier
-                            .weight(0.42f)
-                            .fillMaxHeight()
-                            .padding(start = 8.dp, end = 16.dp, top = 16.dp, bottom = 16.dp)
-                    ) {
-                        Card(
-                            modifier = Modifier.fillMaxSize(),
-                            shape = RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
-                        ) {
-                            IptvDashboard(
-                                viewModel = viewModel,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
                     }
                 }
             } else {
@@ -785,7 +785,9 @@ fun CinemaTheaterLayout(
         }
 
         // 3. Compute the adaptive player dimensions based on target area fraction (~0.96f)
-        val isMini = !isEpgGuideMode && isIptvActive && playableUri != null && showDebugPanel
+        val localConfig = androidx.compose.ui.platform.LocalConfiguration.current
+        val isExpandedScreen = localConfig.screenWidthDp >= 600
+        val isMini = !isEpgGuideMode && isIptvActive && playableUri != null && showDebugPanel && !isExpandedScreen
 
         val aspectR = detectedRatio.coerceIn(0.3f, 3.5f) // sensible min/max bounds
         val miniWidthDp = if (maxWidth >= 600.dp) 240.dp else 180.dp
