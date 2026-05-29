@@ -830,8 +830,10 @@ fun CinemaTheaterLayout(
         // Check if layout is customized. If coordinates match the theme default, we treat it as centered.
         val isCustomized = (screenLayout.left != themePreset.defaultLeft || screenLayout.top != themePreset.defaultTop)
 
-        val maxLeftFrac = ((containerWidthVal - calculatedWidth) / containerWidthVal).coerceAtLeast(0f)
-        val maxTopFrac = ((containerHeightVal - calculatedHeight) / containerHeightVal).coerceAtLeast(0f)
+        val safeContainerWidthVal = containerWidthVal.coerceAtLeast(1f)
+        val safeContainerHeightVal = containerHeightVal.coerceAtLeast(1f)
+        val maxLeftFrac = ((safeContainerWidthVal - calculatedWidth) / safeContainerWidthVal).coerceAtLeast(0f)
+        val maxTopFrac = ((safeContainerHeightVal - calculatedHeight) / safeContainerHeightVal).coerceAtLeast(0f)
 
         // Lightweight dragging offset tracking separates high-frequency offset writes from persistent storage saves
         var isDragging by remember { mutableStateOf(false) }
@@ -851,26 +853,36 @@ fun CinemaTheaterLayout(
         val topPaddingPx = with(density) { 72.dp.toPx() } // offset from status/title bar
         val bottomPaddingPx = with(density) { 16.dp.toPx() }
 
+        // Safeguarded canvas dimensions and empty range protection
+        val safeCanvasWidthPx = canvasWidthPx.coerceAtLeast(1f)
+        val safeCanvasHeightPx = canvasHeightPx.coerceAtLeast(1f)
+
+        val maxMiniLeftPx = (safeCanvasWidthPx - miniWidthPx).coerceAtLeast(0f)
+        val maxMiniTopPx = (safeCanvasHeightPx - miniHeightPx).coerceAtLeast(0f)
+
+        val maxMiniLeftFraction = (maxMiniLeftPx / safeCanvasWidthPx).coerceAtLeast(0f)
+        val maxMiniTopFraction = (maxMiniTopPx / safeCanvasHeightPx).coerceAtLeast(0f)
+
         val targetCornerLeftFrac: Float
         val targetCornerTopFrac: Float
 
         if (isMini) {
             when (miniPlayerCorner) {
                 0 -> { // Top-Right
-                    targetCornerLeftFrac = (canvasWidthPx - miniWidthPx - edgePaddingPx) / canvasWidthPx
-                    targetCornerTopFrac = topPaddingPx / canvasHeightPx
+                    targetCornerLeftFrac = ((safeCanvasWidthPx - miniWidthPx - edgePaddingPx) / safeCanvasWidthPx).coerceIn(0f, maxMiniLeftFraction)
+                    targetCornerTopFrac = (topPaddingPx / safeCanvasHeightPx).coerceIn(0f, maxMiniTopFraction)
                 }
                 1 -> { // Bottom-Right
-                    targetCornerLeftFrac = (canvasWidthPx - miniWidthPx - edgePaddingPx) / canvasWidthPx
-                    targetCornerTopFrac = (canvasHeightPx - miniHeightPx - bottomPaddingPx) / canvasHeightPx
+                    targetCornerLeftFrac = ((safeCanvasWidthPx - miniWidthPx - edgePaddingPx) / safeCanvasWidthPx).coerceIn(0f, maxMiniLeftFraction)
+                    targetCornerTopFrac = ((safeCanvasHeightPx - miniHeightPx - bottomPaddingPx) / safeCanvasHeightPx).coerceIn(0f, maxMiniTopFraction)
                 }
                 2 -> { // Bottom-Left
-                    targetCornerLeftFrac = edgePaddingPx / canvasWidthPx
-                    targetCornerTopFrac = (canvasHeightPx - miniHeightPx - bottomPaddingPx) / canvasHeightPx
+                    targetCornerLeftFrac = (edgePaddingPx / safeCanvasWidthPx).coerceIn(0f, maxMiniLeftFraction)
+                    targetCornerTopFrac = ((safeCanvasHeightPx - miniHeightPx - bottomPaddingPx) / safeCanvasHeightPx).coerceIn(0f, maxMiniTopFraction)
                 }
                 else -> { // Top-Left
-                    targetCornerLeftFrac = edgePaddingPx / canvasWidthPx
-                    targetCornerTopFrac = topPaddingPx / canvasHeightPx
+                    targetCornerLeftFrac = (edgePaddingPx / safeCanvasWidthPx).coerceIn(0f, maxMiniLeftFraction)
+                    targetCornerTopFrac = (topPaddingPx / safeCanvasHeightPx).coerceIn(0f, maxMiniTopFraction)
                 }
             }
         } else {
@@ -881,18 +893,20 @@ fun CinemaTheaterLayout(
         // Proactively synchronize local dragging states when view layout modifications or screen dimensions update
         LaunchedEffect(screenLayout.left, screenLayout.top, containerWidthVal, containerHeightVal, calculatedWidth, calculatedHeight, isDragging, isMini) {
             if (!isDragging && !isMini) {
+                val safeW = containerWidthVal.coerceAtLeast(1f)
+                val safeH = containerHeightVal.coerceAtLeast(1f)
                 activeLeftFraction = if (isCustomized) {
                     screenLayout.left.coerceIn(0f, maxLeftFrac)
                 } else {
-                    val defaultLeft = (containerWidthVal - calculatedWidth) / 2f
-                    (defaultLeft / containerWidthVal).coerceIn(0f, maxLeftFrac)
+                    val defaultLeft = (safeW - calculatedWidth) / 2f
+                    (defaultLeft / safeW).coerceIn(0f, maxLeftFrac)
                 }
 
                 activeTopFraction = if (isCustomized) {
                     screenLayout.top.coerceIn(0f, maxTopFrac)
                 } else {
-                    val defaultTop = (containerHeightVal - calculatedHeight) / 2f
-                    (defaultTop / containerHeightVal).coerceIn(0f, maxTopFrac)
+                    val defaultTop = (safeH - calculatedHeight) / 2f
+                    (defaultTop / safeH).coerceIn(0f, maxTopFrac)
                 }
             }
         }
@@ -902,9 +916,9 @@ fun CinemaTheaterLayout(
             0f
         } else if (isMini) {
             if (isMiniDragging) {
-                ((targetCornerLeftFrac * canvasWidthPx + miniDragOffsetX).coerceIn(0f, canvasWidthPx - miniWidthPx) / canvasWidthPx)
+                ((targetCornerLeftFrac * safeCanvasWidthPx + miniDragOffsetX).coerceIn(0f, maxMiniLeftPx) / safeCanvasWidthPx)
             } else {
-                targetCornerLeftFrac.coerceIn(0f, (canvasWidthPx - miniWidthPx) / canvasWidthPx)
+                targetCornerLeftFrac.coerceIn(0f, maxMiniLeftFraction)
             }
         } else {
             activeLeftFraction
@@ -914,9 +928,9 @@ fun CinemaTheaterLayout(
             0f
         } else if (isMini) {
             if (isMiniDragging) {
-                ((targetCornerTopFrac * canvasHeightPx + miniDragOffsetY).coerceIn(0f, canvasHeightPx - miniHeightPx) / canvasHeightPx)
+                ((targetCornerTopFrac * safeCanvasHeightPx + miniDragOffsetY).coerceIn(0f, maxMiniTopPx) / safeCanvasHeightPx)
             } else {
-                targetCornerTopFrac.coerceIn(0f, (canvasHeightPx - miniHeightPx) / canvasHeightPx)
+                targetCornerTopFrac.coerceIn(0f, maxMiniTopFraction)
             }
         } else {
             activeTopFraction
@@ -974,13 +988,13 @@ fun CinemaTheaterLayout(
                     },
                     onDragEnd = {
                         isMiniDragging = false
-                        val finalLeftPx = targetCornerLeftFrac * canvasWidthPx + miniDragOffsetX
-                        val finalTopPx = targetCornerTopFrac * canvasHeightPx + miniDragOffsetY
+                        val finalLeftPx = targetCornerLeftFrac * safeCanvasWidthPx + miniDragOffsetX
+                        val finalTopPx = targetCornerTopFrac * safeCanvasHeightPx + miniDragOffsetY
 
                         val centerPX = finalLeftPx + miniWidthPx / 2f
                         val centerPY = finalTopPx + miniHeightPx / 2f
-                        val snapToRight = centerPX > canvasWidthPx / 2f
-                        val snapToBottom = centerPY > canvasHeightPx / 2f
+                        val snapToRight = centerPX > safeCanvasWidthPx / 2f
+                        val snapToBottom = centerPY > safeCanvasHeightPx / 2f
 
                         miniPlayerCorner = when {
                             !snapToRight && !snapToBottom -> 3 // Top-Left
@@ -2176,6 +2190,11 @@ fun getNowAndNextForChannel(
     return Pair(current, next)
 }
 
+private fun Float.safeCoerceIn(min: Float, max: Float): Float {
+    val realMax = max.coerceAtLeast(min)
+    return this.coerceIn(min, realMax)
+}
+
 private fun checkRatioResize(
     newW: Float,
     newH: Float,
@@ -2187,11 +2206,11 @@ private fun checkRatioResize(
 ): Pair<Float, Float> {
     if (ratio == null) {
         return Pair(
-            newW.coerceIn(0.10f, 1.0f - left),
-            newH.coerceIn(0.10f, 1.0f - top)
+            newW.safeCoerceIn(0.10f, 1.0f - left),
+            newH.safeCoerceIn(0.10f, 1.0f - top)
         )
     } else {
-        var w = newW.coerceIn(0.10f, 1.0f - left)
+        var w = newW.safeCoerceIn(0.10f, 1.0f - left)
         var h = (w * canvasWidth) / (ratio * canvasHeight)
 
         if (h > 1.0f - top) {
@@ -2220,8 +2239,8 @@ private fun checkRatioResizeTopLeft(
     ratio: Float?
 ): ScreenLayoutSettings {
     if (ratio == null) {
-        val clampLeft = newLeft.coerceIn(0f, fixedRight - 0.10f)
-        val clampTop = newTop.coerceIn(0f, fixedBottom - 0.10f)
+        val clampLeft = newLeft.safeCoerceIn(0f, fixedRight - 0.10f)
+        val clampTop = newTop.safeCoerceIn(0f, fixedBottom - 0.10f)
         return ScreenLayoutSettings(
             left = clampLeft,
             top = clampTop,
@@ -2231,7 +2250,7 @@ private fun checkRatioResizeTopLeft(
             subtitleOffset = 0f
         )
     } else {
-        val proposedLeft = newLeft.coerceIn(0f, fixedRight - 0.10f)
+        val proposedLeft = newLeft.safeCoerceIn(0f, fixedRight - 0.10f)
         val proposedW = fixedRight - proposedLeft
         var h = (proposedW * canvasWidth) / (ratio * canvasHeight)
 
@@ -2270,8 +2289,8 @@ private fun checkRatioResizeTopRight(
     ratio: Float?
 ): ScreenLayoutSettings {
     if (ratio == null) {
-        val clampRight = newRight.coerceIn(fixedLeft + 0.10f, 1.0f)
-        val clampTop = newTop.coerceIn(0f, fixedBottom - 0.10f)
+        val clampRight = newRight.safeCoerceIn(fixedLeft + 0.10f, 1.0f)
+        val clampTop = newTop.safeCoerceIn(0f, fixedBottom - 0.10f)
         return ScreenLayoutSettings(
             left = fixedLeft,
             top = clampTop,
@@ -2281,7 +2300,7 @@ private fun checkRatioResizeTopRight(
             subtitleOffset = 0f
         )
     } else {
-        val proposedRight = newRight.coerceIn(fixedLeft + 0.10f, 1.0f)
+        val proposedRight = newRight.safeCoerceIn(fixedLeft + 0.10f, 1.0f)
         val proposedW = proposedRight - fixedLeft
         var h = (proposedW * canvasWidth) / (ratio * canvasHeight)
 
@@ -2319,8 +2338,8 @@ private fun checkRatioResizeBottomLeft(
     ratio: Float?
 ): ScreenLayoutSettings {
     if (ratio == null) {
-        val clampLeft = newLeft.coerceIn(0f, fixedRight - 0.10f)
-        val clampBottom = newBottom.coerceIn(fixedTop + 0.10f, 1.0f)
+        val clampLeft = newLeft.safeCoerceIn(0f, fixedRight - 0.10f)
+        val clampBottom = newBottom.safeCoerceIn(fixedTop + 0.10f, 1.0f)
         return ScreenLayoutSettings(
             left = clampLeft,
             top = fixedTop,
@@ -2330,7 +2349,7 @@ private fun checkRatioResizeBottomLeft(
             subtitleOffset = 0f
         )
     } else {
-        val proposedLeft = newLeft.coerceIn(0f, fixedRight - 0.10f)
+        val proposedLeft = newLeft.safeCoerceIn(0f, fixedRight - 0.10f)
         val proposedW = fixedRight - proposedLeft
         var h = (proposedW * canvasWidth) / (ratio * canvasHeight)
 
