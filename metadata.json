@@ -1,6 +1,6 @@
 {
-  "name": "Cinema Player",
-  "description": "An installed Android video player designed for foldable inner displays. Acts as an external player to receive shared video links and playable stream URIs through intents.",
+  "name": "CineFold",
+  "description": "An installed Android IPTV video player designed for foldable inner displays. Acts as an external player to receive shared video links & IPTV stream sources.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

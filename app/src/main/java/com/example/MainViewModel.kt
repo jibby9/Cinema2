@@ -35,9 +35,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _activeReminderAlert = MutableStateFlow<IptvReminder?>(null)
     val activeReminderAlert: StateFlow<IptvReminder?> = _activeReminderAlert.asStateFlow()
 
-    private val _recentChannels = MutableStateFlow<List<IptvChannel>>(emptyList())
-    val recentChannels: StateFlow<List<IptvChannel>> = _recentChannels.asStateFlow()
-
     private val _parsedIntent = MutableStateFlow<ParsedIntentInfo?>(null)
     val parsedIntent: StateFlow<ParsedIntentInfo?> = _parsedIntent.asStateFlow()
 
@@ -102,6 +99,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setActiveIptvTab(tab: Int) {
         _activeIptvTab.value = tab
+    }
+
+    private val _isTosAccepted = MutableStateFlow(false)
+    val isTosAccepted: StateFlow<Boolean> = _isTosAccepted.asStateFlow()
+
+    private val _tosAcceptedTimestamp = MutableStateFlow(0L)
+    val tosAcceptedTimestamp: StateFlow<Long> = _tosAcceptedTimestamp.asStateFlow()
+
+    fun acceptTos() {
+        viewModelScope.launch {
+            preferenceManager.saveTosAccepted(true)
+        }
+    }
+
+    private val _isPermissionsPrompted = MutableStateFlow(false)
+    val isPermissionsPrompted: StateFlow<Boolean> = _isPermissionsPrompted.asStateFlow()
+
+    fun dismissPermissionsPrompt() {
+        viewModelScope.launch {
+            preferenceManager.savePermissionsPrompted(true)
+        }
     }
 
     private val _xtreamAccounts = MutableStateFlow<List<XtreamAccount>>(emptyList())
@@ -195,38 +213,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isAnimationEnabled = MutableStateFlow(true)
     val isAnimationEnabled: StateFlow<Boolean> = _isAnimationEnabled.asStateFlow()
 
-    // Local Video Playback states
-    private val _recentLocalVideos = MutableStateFlow<List<RecentLocalVideo>>(emptyList())
-    val recentLocalVideos: StateFlow<List<RecentLocalVideo>> = _recentLocalVideos.asStateFlow()
+    // IPTV History state
+    private val _iptvHistory = MutableStateFlow<List<IptvHistoryItem>>(emptyList())
+    val iptvHistory: StateFlow<List<IptvHistoryItem>> = _iptvHistory.asStateFlow()
 
-    private val _localVideoTitle = MutableStateFlow<String?>(null)
-    val localVideoTitle: StateFlow<String?> = _localVideoTitle.asStateFlow()
+    // Picture-in-Picture state
+    private val _isInPictureInPicture = MutableStateFlow(false)
+    val isInPictureInPicture: StateFlow<Boolean> = _isInPictureInPicture.asStateFlow()
 
-    // Sports Schedule State fields
-    private val sportsRepository: SportsRepository = StaticSportsRepository(application)
-
-    private val _sportsEvents = MutableStateFlow<List<SportsEvent>>(emptyList())
-    val sportsEvents: StateFlow<List<SportsEvent>> = _sportsEvents.asStateFlow()
-
-    private val _selectedSportFilter = MutableStateFlow<String?>(null)
-    val selectedSportFilter: StateFlow<String?> = _selectedSportFilter.asStateFlow()
-
-    private val _sportsSearchQuery = MutableStateFlow("")
-    val sportsSearchQuery: StateFlow<String> = _sportsSearchQuery.asStateFlow()
-
-    private val _liveNowOnly = MutableStateFlow(false)
-    val liveNowOnly: StateFlow<Boolean> = _liveNowOnly.asStateFlow()
-
-    // Sports Ticker Manager integration
-    val sportsTickerManager = LiveSportsTickerManager()
-
-    val tickerScore: StateFlow<TickerScore?> = sportsTickerManager.scoreFlow
-    val tickerStats: StateFlow<List<TickerStat>> = sportsTickerManager.statsFlow
-    val tickerTimeline: StateFlow<List<TickerTimelineEvent>> = sportsTickerManager.timelineFlow
-    val tickerSyncConfig: StateFlow<TickerSyncConfig> = sportsTickerManager.syncConfig
-
-    private val _identifiedSportsEvent = MutableStateFlow<SportsEvent?>(null)
-    val identifiedSportsEvent: StateFlow<SportsEvent?> = _identifiedSportsEvent.asStateFlow()
+    fun setInPictureInPicture(inPiP: Boolean) {
+        _isInPictureInPicture.value = inPiP
+        if (inPiP) {
+            _showDebugPanel.value = false // Hide nonessential UI while in PiP
+        }
+    }
 
     // Alternative Fallback URLs for easy switching during development:
     // Fallback Sample: "http://clips.vorwaerts-gmbh.de/big_buck_bunny.mp4"
@@ -285,6 +285,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             preferenceManager.isIptvModeActive.collect { active ->
                 _isIptvModeActive.value = active
+                if (active) {
+                    // Defer cold start loading slightly to allow core UI setup to render smoothly first
+                    kotlinx.coroutines.delay(400)
+                    loadActiveIptvSource()
+                }
             }
         }
 
@@ -333,22 +338,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            preferenceManager.localRecentVideosJson.collect { json ->
-                _recentLocalVideos.value = deserializeRecentLocalVideos(json)
+            preferenceManager.iptvHistoryJson.collect { json ->
+                _iptvHistory.value = deserializeIptvHistory(json)
             }
         }
 
         viewModelScope.launch {
             preferenceManager.xtreamAccountsJson.collect { json ->
                 _xtreamAccounts.value = deserializeAccounts(json)
-                loadActiveIptvSource()
+                if (_isIptvModeActive.value) {
+                    loadActiveIptvSource()
+                }
             }
         }
 
         viewModelScope.launch {
             preferenceManager.m3uPlaylistsJson.collect { json ->
                 _m3uPlaylists.value = deserializeM3uConfigs(json)
-                loadActiveIptvSource()
+                if (_isIptvModeActive.value) {
+                    loadActiveIptvSource()
+                }
             }
         }
 
@@ -367,6 +376,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        viewModelScope.launch {
+            preferenceManager.isTosAccepted.collect { accepted ->
+                _isTosAccepted.value = accepted
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.tosAcceptedTimestamp.collect { ts ->
+                _tosAcceptedTimestamp.value = ts
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.isPermissionsPrompted.collect { prompted ->
+                _isPermissionsPrompted.value = prompted
+            }
+        }
+
         // ==========================================
         // INITIALIZE PREMIUM FEATURES
         // ==========================================
@@ -375,7 +402,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _reminders.value = premiumStore.loadReminders()
 
         startRemindersPolling()
-        refreshSportsEvents()
 
         viewModelScope.launch {
             val lastPresetId = premiumStore.getLastPresetId()
@@ -599,8 +625,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _errorMessage.value = null
         } else {
             _currentPlayingChannel.value = null
-            _identifiedSportsEvent.value = null
-            sportsTickerManager.stopTracking()
         }
     }
 
@@ -657,6 +681,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setIptvModeActive(active: Boolean) {
         viewModelScope.launch {
             preferenceManager.saveIptvModeActive(active)
+            if (active) {
+                val lastId = _lastChannelId.value
+                if (lastId != null && _currentPlayingChannel.value == null) {
+                    val match = _iptvChannels.value.find { it.id == lastId }
+                    if (match != null) {
+                        playIptvChannel(match)
+                    }
+                }
+            }
         }
     }
 
@@ -669,21 +702,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playIptvChannel(channel: IptvChannel) {
-        val current = _currentPlayingChannel.value
-        if (current != null && current.id != channel.id) {
-            val hist = _recentChannels.value.toMutableList()
-            hist.removeAll { it.id == current.id }
-            hist.add(0, current)
-            if (hist.size > 10) {
-                hist.removeAt(hist.lastIndex)
-            }
-            _recentChannels.value = hist
-        }
-
         _currentPlayingChannel.value = channel
         setPlayableUri(channel.streamUrl)
         
-        onActiveChannelOrEpgChanged(channel)
+        addToIptvHistory(channel)
 
         viewModelScope.launch {
             preferenceManager.saveLastChannelId(channel.id)
@@ -696,9 +718,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun recallPreviousIptvChannel() {
-        val previous = _recentChannels.value.firstOrNull()
-        if (previous != null) {
-            playIptvChannel(previous)
+        val list = _iptvHistory.value
+        // If current is playing, previous is index 1. If not, index 0.
+        val currentPlaying = _currentPlayingChannel.value
+        val index = if (currentPlaying != null && list.isNotEmpty() && list[0].id == currentPlaying.id) 1 else 0
+        if (index < list.size) {
+            val favs = _favoriteChannelIds.value
+            val item = list[index]
+            playIptvChannel(item.toIptvChannel(favs.contains(item.id)))
         }
     }
 
@@ -976,21 +1003,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isIptvLoading.value = true
             _iptvErrorMessage.value = null
 
+            val trimmedName = name.trim()
+            val trimmedUrl = playlistUrl.trim()
+
+            if (trimmedName.isBlank()) {
+                _iptvErrorMessage.value = "Configuration error: Playlist name cannot be empty."
+                _isIptvLoading.value = false
+                return@launch
+            }
+            if (trimmedUrl.isBlank()) {
+                _iptvErrorMessage.value = "Configuration error: Playlist URL cannot be empty."
+                _isIptvLoading.value = false
+                return@launch
+            }
+
+            if (!trimmedUrl.startsWith("http://", ignoreCase = true) && 
+                !trimmedUrl.startsWith("https://", ignoreCase = true)) {
+                _iptvErrorMessage.value = "Validation error: Invalid URL scheme. M3U URL must start with http:// or https://"
+                _isIptvLoading.value = false
+                return@launch
+            }
+
             try {
-                // Test stream load
-                IptvClient.fetchUrlStream(playlistUrl).use { /* test stream opens */ }
+                // Test playlist network stream connectivity and timeout bounds
+                IptvClient.fetchUrlStream(trimmedUrl).use { /* verify stream can be reached safely */ }
                 
                 // Deactivate others
                 val currentM3uList = _m3uPlaylists.value.map { it.copy(isActive = false) }.toMutableList()
                 val currentXtream = _xtreamAccounts.value.map { it.copy(isActive = false) }
                 preferenceManager.saveXtreamAccountsJson(serializeAccounts(currentXtream))
 
-                val newConfig = M3UConfig(name, playlistUrl, epgUrl, isActive = true)
+                val newConfig = M3UConfig(trimmedName, trimmedUrl, epgUrl?.trim()?.takeIf { it.isNotBlank() }, isActive = true)
                 currentM3uList.add(newConfig)
 
                 preferenceManager.saveM3uPlaylistsJson(serializeM3uConfigs(currentM3uList))
+                
+                // Triggers immediate loading of new source
+                viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                    loadActiveIptvSource()
+                }
             } catch (e: Exception) {
-                _iptvErrorMessage.value = "M3U file check failed: ${e.localizedMessage}"
+                Log.e(TAG, "M3U connection or parse initialization test failed", e)
+                _iptvErrorMessage.value = "Connection check failed: Unable to fetch source. Please verify URL is active."
             } finally {
                 _isIptvLoading.value = false
             }
@@ -1024,6 +1078,101 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- Loading channels engine ---
 
+    private var activeLoadJob: kotlinx.coroutines.Job? = null
+
+    private fun getActiveSourceId(): String? {
+        val activeXtream = _xtreamAccounts.value.find { it.isActive }
+        if (activeXtream != null) {
+            return "xtream_" + java.util.UUID.nameUUIDFromBytes("${activeXtream.serverUrl}_${activeXtream.username}".toByteArray()).toString()
+        }
+        val activeM3u = _m3uPlaylists.value.find { it.isActive }
+        if (activeM3u != null) {
+            return "m3u_" + java.util.UUID.nameUUIDFromBytes(activeM3u.playlistUrl.toByteArray()).toString()
+        }
+        return null
+    }
+
+    private fun saveChannelsToLocalCache(sourceId: String, categories: List<IptvCategory>, channels: List<IptvChannel>) {
+        try {
+            val file = java.io.File(getApplication<Application>().cacheDir, "iptv_cache_$sourceId.json")
+            val root = org.json.JSONObject()
+            
+            val catsArr = org.json.JSONArray()
+            for (c in categories) {
+                val obj = org.json.JSONObject()
+                obj.put("id", c.id)
+                obj.put("name", c.name)
+                obj.put("type", c.type)
+                catsArr.put(obj)
+            }
+            root.put("categories", catsArr)
+            
+            val chanArr = org.json.JSONArray()
+            for (ch in channels) {
+                val obj = org.json.JSONObject()
+                obj.put("id", ch.id)
+                obj.put("name", ch.name)
+                obj.put("logoUrl", ch.logoUrl ?: "")
+                obj.put("streamUrl", ch.streamUrl)
+                obj.put("categoryId", ch.categoryId)
+                obj.put("epgId", ch.epgId ?: "")
+                chanArr.put(obj)
+            }
+            root.put("channels", chanArr)
+            
+            file.writeText(root.toString())
+            Log.d(TAG, "Cached IPTV source $sourceId locally: ${categories.size} categories and ${channels.size} channels.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed writing IPTV channels to cache", e)
+        }
+    }
+
+    private fun loadChannelsFromLocalCache(sourceId: String): Pair<List<IptvCategory>, List<IptvChannel>>? {
+        try {
+            val file = java.io.File(getApplication<Application>().cacheDir, "iptv_cache_$sourceId.json")
+            if (!file.exists()) return null
+            
+            val json = file.readText()
+            val root = org.json.JSONObject(json)
+            
+            val catsArr = root.getJSONArray("categories")
+            val categories = mutableListOf<IptvCategory>()
+            for (i in 0 until catsArr.length()) {
+                val obj = catsArr.getJSONObject(i)
+                categories.add(
+                    IptvCategory(
+                        id = obj.getString("id"),
+                        name = obj.getString("name"),
+                        type = obj.optString("type", "live")
+                    )
+                )
+            }
+            
+            val chanArr = root.getJSONArray("channels")
+            val channels = mutableListOf<IptvChannel>()
+            val favorites = _favoriteChannelIds.value
+            for (i in 0 until chanArr.length()) {
+                val obj = chanArr.getJSONObject(i)
+                val id = obj.getString("id")
+                channels.add(
+                    IptvChannel(
+                        id = id,
+                        name = obj.getString("name"),
+                        logoUrl = obj.optString("logoUrl").takeIf { it.isNotBlank() },
+                        streamUrl = obj.getString("streamUrl"),
+                        categoryId = obj.optString("categoryId", ""),
+                        epgId = obj.optString("epgId").takeIf { it.isNotBlank() },
+                        isFavorite = favorites.contains(id)
+                    )
+                )
+            }
+            return Pair(categories, channels)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed reading IPTV channels from cache", e)
+            return null
+        }
+    }
+
     fun loadActiveIptvSource() {
         val activeXtream = _xtreamAccounts.value.find { it.isActive }
         val activeM3u = _m3uPlaylists.value.find { it.isActive }
@@ -1036,11 +1185,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        // Validate account details before spinning up dispatchers
+        if (activeXtream != null) {
+            if (activeXtream.serverUrl.isBlank() || activeXtream.username.isBlank()) {
+                _iptvErrorMessage.value = "Configuration error: Active Xtream Server URL or Username is blank."
+                return
+            }
+        }
+        if (activeM3u != null) {
+            if (activeM3u.playlistUrl.isBlank()) {
+                _iptvErrorMessage.value = "Configuration error: Active M3U playlist URL is blank."
+                return
+            }
+        }
+
+        activeLoadJob?.cancel()
+        activeLoadJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             _isIptvLoading.value = true
             _iptvErrorMessage.value = null
 
-            // Try rendering instantaneous cached EPG first!
+            // 1. Try rendering instantaneous cached EPG first!
             try {
                 val cached = loadEpgFromLocalCache()
                 if (cached.isNotEmpty()) {
@@ -1050,30 +1214,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.e(TAG, "Local EPG cache initial load failed", e)
             }
 
-            try {
-                if (activeXtream != null) {
-                    val cats = IptvClient.fetchXtreamCategories(
-                        activeXtream.serverUrl, activeXtream.username, activeXtream.password
-                    )
-                    val rawChannels = IptvClient.fetchXtreamChannels(
-                        activeXtream.serverUrl, activeXtream.username, activeXtream.password
-                    )
-                    val favorites = _favoriteChannelIds.value
-                    val channels = rawChannels.map { it.copy(isFavorite = favorites.contains(it.id)) }
-
-                    _iptvCategories.value = cats
-                    _iptvChannels.value = channels
-                    
-                    val currentCategory = _selectedCategory.value
-                    if (currentCategory == null || !cats.any { it.id == currentCategory.id }) {
-                        _selectedCategory.value = cats.firstOrNull()
-                    }
-                } else if (activeM3u != null) {
-                    IptvClient.fetchUrlStream(activeM3u.playlistUrl).use { stream ->
-                        val (cats, rawChannels) = IptvParser.parseM3u(stream)
-                        val favorites = _favoriteChannelIds.value
-                        val channels = rawChannels.map { it.copy(isFavorite = favorites.contains(it.id)) }
-
+            // 2. Try to load local source cache (channels & categories) for instant UI
+            val sourceId = getActiveSourceId()
+            var hasLoadedFromCache = false
+            if (sourceId != null) {
+                try {
+                    val cachedSource = loadChannelsFromLocalCache(sourceId)
+                    if (cachedSource != null && cachedSource.second.isNotEmpty()) {
+                        val (cats, channels) = cachedSource
                         _iptvCategories.value = cats
                         _iptvChannels.value = channels
                         
@@ -1081,10 +1229,122 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         if (currentCategory == null || !cats.any { it.id == currentCategory.id }) {
                             _selectedCategory.value = cats.firstOrNull()
                         }
+                        hasLoadedFromCache = true
+                        
+                        // Auto-resume channel if returning/loading
+                        val lastId = _lastChannelId.value
+                        if (lastId != null && _currentPlayingChannel.value == null && _isIptvModeActive.value) {
+                            val match = channels.find { it.id == lastId }
+                            if (match != null) {
+                                viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                                    playIptvChannel(match)
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to load channel cache on startup", e)
+                }
+            }
+
+            // 3. Progressive fetch from network with robust, crash-proof exception handling
+            try {
+                if (activeXtream != null) {
+                    val rawCats = IptvClient.fetchXtreamCategories(
+                        activeXtream.serverUrl, activeXtream.username, activeXtream.password
+                    )
+                    val rawChannels = IptvClient.fetchXtreamChannels(
+                        activeXtream.serverUrl, activeXtream.username, activeXtream.password
+                    )
+                    val favorites = _favoriteChannelIds.value
+                    
+                    var verifiedCats = rawCats
+                    var channels = rawChannels.map { it.copy(isFavorite = favorites.contains(it.id)) }
+
+                    if (channels.isEmpty() && !hasLoadedFromCache) {
+                        _iptvErrorMessage.value = "This Xtream source currently has no online channels. Please check credentials or URL."
+                    } else if (channels.isNotEmpty()) {
+                        if (verifiedCats.isEmpty()) {
+                            // Create a fallback category so channels aren't hidden
+                            val fallbackCat = IptvCategory(id = "xtream_default", name = "Default Category", type = "live")
+                            verifiedCats = listOf(fallbackCat)
+                            channels = channels.map { it.copy(categoryId = "xtream_default") }
+                        }
+
+                        _iptvCategories.value = verifiedCats
+                        _iptvChannels.value = channels
+                        
+                        if (sourceId != null) {
+                            saveChannelsToLocalCache(sourceId, verifiedCats, channels)
+                        }
+
+                        val currentCategory = _selectedCategory.value
+                        if (currentCategory == null || !verifiedCats.any { it.id == currentCategory.id }) {
+                            _selectedCategory.value = verifiedCats.firstOrNull()
+                        }
+
+                        // Auto-resume channel if returning/loading
+                        val lastId = _lastChannelId.value
+                        if (lastId != null && _currentPlayingChannel.value == null && _isIptvModeActive.value) {
+                            val match = channels.find { it.id == lastId }
+                            if (match != null) {
+                                viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                                    playIptvChannel(match)
+                                }
+                            }
+                        }
+                    }
+                } else if (activeM3u != null) {
+                    val urlToFetch = activeM3u.playlistUrl.trim()
+                    if (!urlToFetch.startsWith("http://", ignoreCase = true) && 
+                        !urlToFetch.startsWith("https://", ignoreCase = true)) {
+                        throw Exception("Unsupported URI scheme. URLs must start with http:// or https://")
+                    }
+
+                    IptvClient.fetchUrlStream(urlToFetch).use { stream ->
+                        val (cats, rawChannels) = IptvParser.parseM3u(stream)
+                        val favorites = _favoriteChannelIds.value
+                        var channels = rawChannels.map { it.copy(isFavorite = favorites.contains(it.id)) }
+                        var verifiedCats = cats
+
+                        if (channels.isEmpty() && !hasLoadedFromCache) {
+                            _iptvErrorMessage.value = "No valid stream channels found in this playlist. Ensure lines have proper stream links."
+                        } else if (channels.isNotEmpty()) {
+                            if (verifiedCats.isEmpty()) {
+                                // Create a fallback category
+                                val fallbackCat = IptvCategory(id = "m3u_default", name = "All Channels", type = "live")
+                                verifiedCats = listOf(fallbackCat)
+                                channels = channels.map { it.copy(categoryId = "m3u_default") }
+                            }
+
+                            _iptvCategories.value = verifiedCats
+                            _iptvChannels.value = channels
+                            
+                            if (sourceId != null) {
+                                saveChannelsToLocalCache(sourceId, verifiedCats, channels)
+                            }
+
+                            val currentCategory = _selectedCategory.value
+                            if (currentCategory == null || !verifiedCats.any { it.id == currentCategory.id }) {
+                                _selectedCategory.value = verifiedCats.firstOrNull()
+                            }
+
+                            // Auto-resume channel if returning/loading
+                            val lastId = _lastChannelId.value
+                            if (lastId != null && _currentPlayingChannel.value == null && _isIptvModeActive.value) {
+                                val match = channels.find { it.id == lastId }
+                                if (match != null) {
+                                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                                        playIptvChannel(match)
+                                    }
+                                }
+                            }
+                        }
 
                         // Load XMLTV EPG
                         val xmltvUrl = activeM3u.epgUrl
-                        if (!xmltvUrl.isNullOrBlank()) {
+                        if (!xmltvUrl.isNullOrBlank() && 
+                            (xmltvUrl.startsWith("http://", ignoreCase = true) || xmltvUrl.startsWith("https://", ignoreCase = true))) {
                             try {
                                 IptvClient.fetchUrlStream(xmltvUrl).use { xmlStream ->
                                     val eps = IptvParser.parseXmltv(xmlStream)
@@ -1098,8 +1358,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "IPTV channel initialization stream error", e)
-                _iptvErrorMessage.value = "Stream source error: ${e.localizedMessage}"
+                if (e is kotlinx.coroutines.CancellationException) {
+                    Log.d(TAG, "IPTV source loading job cancelled intentionally.")
+                    throw e
+                }
+                Log.e(TAG, "IPTV channel initialization stream/network error", e)
+                if (!hasLoadedFromCache) {
+                    _iptvErrorMessage.value = "Import Failed: Unable to read playlist content (${e.localizedMessage})."
+                }
             } finally {
                 _isIptvLoading.value = false
             }
@@ -1351,164 +1617,85 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- Local Videos Playback Engine ---
+    // --- IPTV Channel History Engine ---
 
-    fun playLocalVideo(uri: String, filename: String) {
-        _localVideoTitle.value = filename
-        val virtualChannel = IptvChannel(
-            id = "local_${uri.hashCode()}",
-            name = filename,
-            logoUrl = null,
-            streamUrl = uri,
-            categoryId = "Local Videos",
-            isFavorite = false
-        )
-        _currentPlayingChannel.value = virtualChannel
-        _playableUri.value = uri
-        _errorMessage.value = null
-        
-        saveRecentLocalVideo(uri, filename)
-    }
-
-    private fun saveRecentLocalVideo(uri: String, filename: String) {
+    fun addToIptvHistory(channel: IptvChannel) {
         viewModelScope.launch {
-            val current = _recentLocalVideos.value.toMutableList()
-            current.removeAll { it.uri == uri }
-            current.add(0, RecentLocalVideo(uri, filename))
-            val limited = current.take(10)
-            _recentLocalVideos.value = limited
-            preferenceManager.saveLocalRecentVideosJson(serializeRecentLocalVideos(limited))
+            val current = _iptvHistory.value.toMutableList()
+            current.removeAll { it.id == channel.id }
+            current.add(
+                0,
+                IptvHistoryItem(
+                    id = channel.id,
+                    name = channel.name,
+                    logoUrl = channel.logoUrl,
+                    streamUrl = channel.streamUrl,
+                    categoryId = channel.categoryId,
+                    epgId = channel.epgId,
+                    lastWatchedTimestamp = System.currentTimeMillis()
+                )
+            )
+            val limited = current.take(50)
+            _iptvHistory.value = limited
+            preferenceManager.saveIptvHistoryJson(serializeIptvHistory(limited))
         }
     }
 
-    fun removeRecentLocalVideo(uri: String) {
+    fun deleteHistoryItem(channelId: String) {
         viewModelScope.launch {
-            val current = _recentLocalVideos.value.toMutableList()
-            current.removeAll { it.uri == uri }
-            _recentLocalVideos.value = current
-            preferenceManager.saveLocalRecentVideosJson(serializeRecentLocalVideos(current))
+            val current = _iptvHistory.value.toMutableList()
+            current.removeAll { it.id == channelId }
+            _iptvHistory.value = current
+            preferenceManager.saveIptvHistoryJson(serializeIptvHistory(current))
         }
     }
 
-    private fun deserializeRecentLocalVideos(json: String?): List<RecentLocalVideo> {
+    fun clearAllHistory() {
+        viewModelScope.launch {
+            _iptvHistory.value = emptyList()
+            preferenceManager.saveIptvHistoryJson(null)
+        }
+    }
+
+    private fun deserializeIptvHistory(json: String?): List<IptvHistoryItem> {
         if (json.isNullOrBlank()) return emptyList()
-        val list = mutableListOf<RecentLocalVideo>()
+        val list = mutableListOf<IptvHistoryItem>()
         try {
             val arr = org.json.JSONArray(json)
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
                 list.add(
-                    RecentLocalVideo(
-                        uri = obj.getString("uri"),
-                        title = obj.getString("title")
+                    IptvHistoryItem(
+                        id = obj.getString("id"),
+                        name = obj.getString("name"),
+                        logoUrl = if (obj.isNull("logoUrl")) null else obj.getString("logoUrl"),
+                        streamUrl = obj.getString("streamUrl"),
+                        categoryId = if (obj.isNull("categoryId")) "" else obj.getString("categoryId"),
+                        epgId = if (obj.isNull("epgId")) null else obj.getString("epgId"),
+                        lastWatchedTimestamp = obj.optLong("lastWatchedTimestamp", System.currentTimeMillis())
                     )
                 )
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to deserialize recent videos", e)
+            Log.e(TAG, "Failed to deserialize IPTV history", e)
         }
         return list
     }
 
-    private fun serializeRecentLocalVideos(list: List<RecentLocalVideo>): String {
+    private fun serializeIptvHistory(list: List<IptvHistoryItem>): String {
         val arr = org.json.JSONArray()
         list.forEach { item ->
             val obj = org.json.JSONObject()
-            obj.put("uri", item.uri)
-            obj.put("title", item.title)
+            obj.put("id", item.id)
+            obj.put("name", item.name)
+            obj.put("logoUrl", item.logoUrl)
+            obj.put("streamUrl", item.streamUrl)
+            obj.put("categoryId", item.categoryId)
+            obj.put("epgId", item.epgId)
+            obj.put("lastWatchedTimestamp", item.lastWatchedTimestamp)
             arr.put(obj)
         }
         return arr.toString()
-    }
-
-    // --- Sports Scedules & Channel matching control ---
-
-    fun setSportFilter(sport: String?) {
-        _selectedSportFilter.value = sport
-    }
-
-    fun setSportsSearchQuery(query: String) {
-        _sportsSearchQuery.value = query
-    }
-
-    fun toggleLiveNowOnly() {
-        _liveNowOnly.value = !_liveNowOnly.value
-    }
-
-    fun refreshSportsEvents() {
-        viewModelScope.launch {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                sportsRepository.refreshEvents()
-            }
-            _sportsEvents.value = sportsRepository.getFeaturedEvents()
-        }
-    }
-
-    fun getMatchingChannelsForEvent(event: SportsEvent): List<ChannelMatchResult> {
-        return SportsChannelMatcher.matchEventToChannels(
-            event = event,
-            channels = _iptvChannels.value,
-            categories = allRawIptvCategories.value,
-            epgList = _epgProgrammes.value
-        )
-    }
-
-    fun startTrackingSportEvent(event: SportsEvent) {
-        _identifiedSportsEvent.value = event
-        sportsTickerManager.startTrackingEvent(event.title)
-    }
-
-    fun onActiveChannelOrEpgChanged(activeChan: IptvChannel) {
-        viewModelScope.launch {
-            // First we need event list
-            val events = _sportsEvents.value
-            if (events.isEmpty()) return@launch
-
-            var matchedEvent: SportsEvent? = null
-
-            // 1. Try to match currently playing EPG show text
-            val channelEpgs = _epgProgrammes.value.filter { it.channelId == activeChan.id || it.channelId == activeChan.epgId }
-            val now = System.currentTimeMillis()
-            val currentEpgObj = channelEpgs.find { now in it.startMs..it.endMs }
-
-            if (currentEpgObj != null) {
-                val title = currentEpgObj.title.lowercase()
-                matchedEvent = events.find { event ->
-                    val teamA = event.teamA?.lowercase() ?: ""
-                    val teamB = event.teamB?.lowercase() ?: ""
-                    val titleNorm = event.title.lowercase()
-                    (teamA.isNotEmpty() && title.contains(teamA)) || 
-                    (teamB.isNotEmpty() && title.contains(teamB)) ||
-                    title.contains(titleNorm)
-                }
-            }
-
-            // 2. If EPG didn't match, check by active channel name keywords
-            if (matchedEvent == null) {
-                val chanName = activeChan.name.lowercase()
-                matchedEvent = events.find { event ->
-                    val teamA = event.teamA?.lowercase() ?: ""
-                    val teamB = event.teamB?.lowercase() ?: ""
-                    (teamA.isNotEmpty() && chanName.contains(teamA)) ||
-                    (teamB.isNotEmpty() && chanName.contains(teamB))
-                }
-            }
-
-            // 3. Fallback: find any LIVE sports event for the matching category
-            if (matchedEvent == null) {
-                val chanName = activeChan.name.lowercase()
-                val isSportChan = chanName.contains("sport") || chanName.contains("f1") || chanName.contains("ufc")
-                if (isSportChan) {
-                    matchedEvent = events.find { it.getStatus() == "LIVE" }
-                }
-            }
-
-            // Update tracked event
-            matchedEvent?.let {
-                _identifiedSportsEvent.value = it
-                sportsTickerManager.startTrackingEvent(it.id) // track by id or title in manager
-            }
-        }
     }
 }
 
