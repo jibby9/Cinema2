@@ -98,23 +98,16 @@ fun IptvDashboard(
             Tab(
                 selected = activeTab == 2,
                 onClick = { viewModel.setActiveIptvTab(2) },
-                text = { Text("Sources", fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1) },
-                icon = { Icon(Icons.Default.SettingsInputComponent, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                modifier = Modifier.testTag("iptv_tab_sources")
+                text = { Text("History", fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1) },
+                icon = { Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                modifier = Modifier.testTag("iptv_tab_history")
             )
             Tab(
                 selected = activeTab == 3,
                 onClick = { viewModel.setActiveIptvTab(3) },
-                text = { Text("Local Files", fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1) },
-                icon = { Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                modifier = Modifier.testTag("iptv_tab_local")
-            )
-            Tab(
-                selected = activeTab == 4,
-                onClick = { viewModel.setActiveIptvTab(4) },
-                text = { Text("Sports", fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1) },
-                icon = { Icon(Icons.Default.EmojiEvents, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                modifier = Modifier.testTag("iptv_tab_sports")
+                text = { Text("Sources", fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1) },
+                icon = { Icon(Icons.Default.SettingsInputComponent, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                modifier = Modifier.testTag("iptv_tab_sources")
             )
         }
 
@@ -151,16 +144,15 @@ fun IptvDashboard(
 
         // Active layout contents
         Box(modifier = Modifier.weight(1f)) {
-            if (!countsActive && activeTab != 2 && activeTab != 3 && activeTab != 4) {
-                // If no active sources exist, show prompt to set up
-                IptvEmptyStatePrompt(onActionClick = { viewModel.setActiveIptvTab(2) })
+            if (!countsActive && activeTab != 3) {
+                // If no active sources exist, show prompt to set up (setup tab is index 3)
+                IptvEmptyStatePrompt(onActionClick = { viewModel.setActiveIptvTab(3) })
             } else {
                 when (activeTab) {
                     0 -> IptvChannelsTab(viewModel = viewModel)
                     1 -> IptvGuideTab(viewModel = viewModel)
-                    2 -> IptvSetupTab(viewModel = viewModel)
-                    3 -> LocalVideoTab(viewModel = viewModel)
-                    4 -> SportsTab(viewModel = viewModel)
+                    2 -> IptvHistoryTab(viewModel = viewModel)
+                    3 -> IptvSetupTab(viewModel = viewModel)
                 }
             }
         }
@@ -1989,197 +1981,181 @@ fun CategoryManagementDialog(
 }
 
 @Composable
-fun LocalVideoTab(
+fun IptvHistoryTab(
     viewModel: MainViewModel,
     modifier: Modifier = Modifier
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val recentLocalVideos by viewModel.recentLocalVideos.collectAsState()
+    val historyItems by viewModel.iptvHistory.collectAsState()
+    val favorites by viewModel.favoriteChannelIds.collectAsState()
 
-    val openVideoLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: android.net.Uri? ->
-        if (uri != null) {
-            try {
-                val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION
-                context.contentResolver.takePersistableUriPermission(uri, takeFlags)
-            } catch (e: Exception) {
-                Log.w("VideoPicker", "Could not take persistable permission: ${e.message}")
-            }
-
-            var filename = "Local Video"
-            try {
-                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (nameIndex != -1 && cursor.moveToFirst()) {
-                        filename = cursor.getString(nameIndex)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("VideoPicker", "Error fetching filename", e)
-            }
-            viewModel.playLocalVideo(uri.toString(), filename)
-        }
-    }
-
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        try {
-                            openVideoLauncher.launch(arrayOf("video/*"))
-                        } catch (e: Exception) {
-                            Log.e("VideoPicker", "SAF launch failed", e)
-                        }
-                    },
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = IndigoPrimary.copy(alpha = 0.12f)
-                ),
-                border = BorderStroke(1.5.dp, IndigoPrimary.copy(alpha = 0.4f))
+    if (historyItems.isEmpty()) {
+        Box(
+            modifier = modifier.fillMaxSize().padding(32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FolderOpen,
-                        contentDescription = "Open video file",
-                        tint = IndigoPrimary,
-                        modifier = Modifier.size(54.dp)
-                    )
-                    Text(
-                        text = "Open Video File",
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Select any local video file from Android device storage to play it with custom Cinema backdrop styles and settings.",
-                        color = TextMuted,
-                        fontSize = 12.sp,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        lineHeight = 16.sp
-                    )
-                }
-            }
-        }
-
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
+                Icon(
+                    imageVector = Icons.Default.History,
+                    contentDescription = "Empty History",
+                    tint = TextMuted,
+                    modifier = Modifier.size(64.dp)
+                )
                 Text(
-                    text = "Recent Local Videos",
+                    text = "No History Yet",
                     color = Color.White,
-                    fontSize = 14.sp,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
-                if (recentLocalVideos.isNotEmpty()) {
-                    TextButton(
-                        onClick = {
-                            recentLocalVideos.forEach {
-                                viewModel.removeRecentLocalVideo(it.uri)
-                            }
-                        }
-                    ) {
-                        Text("Clear All", color = Color.Red.copy(alpha = 0.7f), fontSize = 11.sp)
-                    }
-                }
+                Text(
+                    text = "Channels you watch will appear here dynamically.",
+                    color = TextMuted,
+                    fontSize = 13.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
             }
         }
-
-        if (recentLocalVideos.isEmpty()) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 32.dp),
-                    contentAlignment = Alignment.Center
+    } else {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            // Header row with "Clear all" action
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Recently Watched",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                TextButton(
+                    onClick = { viewModel.clearAllHistory() },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Red.copy(alpha = 0.8f)),
+                    modifier = Modifier.testTag("clear_all_history_btn")
                 ) {
-                    Text(
-                        text = "No recent local files played yet.",
-                        color = TextMuted,
-                        fontSize = 12.sp
+                    Icon(
+                        imageVector = Icons.Default.DeleteSweep,
+                        contentDescription = "Clear All",
+                        modifier = Modifier.size(16.dp)
                     )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Clear All", fontSize = 12.sp)
                 }
             }
-        } else {
-            items(recentLocalVideos.size) { index ->
-                val video = recentLocalVideos[index]
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { viewModel.playLocalVideo(video.uri, video.title) },
-                    colors = CardDefaults.cardColors(
-                        containerColor = Color.White.copy(alpha = 0.04f)
-                    ),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
-                ) {
-                    Row(
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(historyItems, key = { it.id + "_" + it.lastWatchedTimestamp }) { item ->
+                    Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .clickable {
+                                viewModel.playIptvChannel(item.toIptvChannel(favorites.contains(item.id)))
+                            }
+                            .testTag("history_item_${item.id}"),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1B24)),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Movie,
-                                contentDescription = null,
-                                tint = IndigoPrimary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Column {
+                            // Channel logo or fallback indicator
+                            if (!item.logoUrl.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = item.logoUrl,
+                                    contentDescription = item.name,
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.Black.copy(alpha = 0.2f))
+                                        .padding(4.dp)
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(IndigoPrimary.copy(alpha = 0.2f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = item.name.firstOrNull()?.toString()?.uppercase() ?: "?",
+                                        color = IndigoPrimary,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            // Channel name and timestamp
+                            Column(
+                                modifier = Modifier.weight(1f)
+                            ) {
                                 Text(
-                                    text = video.title,
+                                    text = item.name,
                                     color = Color.White,
-                                    fontSize = 12.5.sp,
+                                    fontSize = 13.5.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+                                Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = video.uri,
+                                    text = formatRelativeTime(item.lastWatchedTimestamp),
                                     color = TextMuted,
-                                    fontSize = 9.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    fontSize = 11.sp
                                 )
                             }
-                        }
 
-                        IconButton(
-                            onClick = { viewModel.removeRecentLocalVideo(video.uri) }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = "Remove from history",
-                                tint = Color.White.copy(alpha = 0.4f),
-                                modifier = Modifier.size(16.dp)
-                            )
+                            // Delete action button
+                            IconButton(
+                                onClick = { viewModel.deleteHistoryItem(item.id) },
+                                modifier = Modifier.testTag("delete_history_item_${item.id}")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Remove from history",
+                                    tint = TextMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }
             }
         }
     }
+}
+
+private fun formatRelativeTime(timestamp: Long): String {
+    val now = System.currentTimeMillis()
+    val diff = now - timestamp
+    if (diff < 0) return "Just now"
+    val diffSecs = diff / 1000
+    if (diffSecs < 60) return "Just now"
+    val diffMins = diffSecs / 60
+    if (diffMins < 60) return "$diffMins min${if (diffMins > 1) "s" else ""} ago"
+    val diffHours = diffMins / 60
+    if (diffHours < 24) return "$diffHours hour${if (diffHours > 1) "s" else ""} ago"
+    val diffDays = diffHours / 24
+    if (diffDays < 7) return "$diffDays day${if (diffDays > 1) "s" else ""} ago"
+    // Fallback simple date
+    val sdf = java.text.SimpleDateFormat("dd MMM yyyy HH:mm", java.util.Locale.getDefault())
+    return sdf.format(java.util.Date(timestamp))
 }

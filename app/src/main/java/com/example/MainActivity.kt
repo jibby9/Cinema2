@@ -39,4 +39,38 @@ class MainActivity : ComponentActivity() {
         // Parse incoming intent dynamically (e.g., when shared from Stremio while player is active)
         viewModel.handleIntent(intent)
     }
+
+    override fun onUserLeaveHint() {
+        val hasActiveStream = viewModel.playableUri.value != null
+        if (hasActiveStream) {
+            enterPipMode()
+        }
+        super.onUserLeaveHint()
+    }
+
+    private fun enterPipMode() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            try {
+                val params = android.app.PictureInPictureParams.Builder()
+                    .setAspectRatio(android.util.Rational(16, 9))
+                    .build()
+                enterPictureInPictureMode(params)
+            } catch (e: Exception) {
+                try {
+                    @Suppress("DEPRECATION")
+                    enterPictureInPictureMode()
+                } catch (fallbackEx: Exception) {
+                    android.util.Log.e("MainActivity", "Failed to enter Picture-in-Picture", fallbackEx)
+                }
+            }
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: android.content.res.Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        viewModel.setInPictureInPicture(isInPictureInPictureMode)
+    }
 }

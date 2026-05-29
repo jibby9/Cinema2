@@ -95,6 +95,45 @@ fun CinemaPlayerScreen(
     val configuration = LocalConfiguration.current
     val customBackgroundUri by viewModel.customBgUri.collectAsState()
     val activeReminderAlert by viewModel.activeReminderAlert.collectAsState()
+    val isInPictureInPicture by viewModel.isInPictureInPicture.collectAsState()
+
+    if (isInPictureInPicture) {
+        CinemaTheaterLayout(
+            viewModel = viewModel,
+            themePreset = activeThemePreset,
+            screenLayout = screenLayout.copy(dimAlpha = 0f),
+            playableUri = playableUri,
+            errorMessage = errorMessage,
+            headers = requestHeaders,
+            onPlayTestVideo = { viewModel.playTestVideo() },
+            onClearPlaySource = { viewModel.setPlayableUri(null) },
+            onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
+            isEditMode = false,
+            activeAspectRatioId = activeAspectRatioId,
+            activeResizeMode = activeResizeMode,
+            onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
+            isSettingsLoaded = isSettingsLoaded,
+            isIptvActive = isIptvModeActive,
+            channels = iptvChannels,
+            epgList = epgProgrammes,
+            currentPlayingChannel = currentPlayingChannel,
+            onPlayChannel = { ch -> viewModel.playIptvChannel(ch) },
+            onPlayNextChannel = { list -> viewModel.playNextIptvChannel(list) },
+            onPlayPreviousChannel = { list -> viewModel.playPreviousIptvChannel(list) },
+            onRecallPreviousChannel = { viewModel.recallPreviousIptvChannel() },
+            glowIntensitySetting = AmbientGlowSetting.OFF,
+            showDebugPanel = false,
+            onToggleDebug = {},
+            onSelectTab = {},
+            onLayoutChanged = { _, _, _, _ -> },
+            isEpgGuideMode = false,
+            isAnimationEnabled = false,
+            onToggleAnimation = {},
+            onSelectTheme = {},
+            modifier = modifier.fillMaxSize()
+        )
+        return
+    }
 
     // Screen classification: if screenWidthDp >= 600, treat as tablet or unfolded foldable inner display.
     val isExpandedLayout = configuration.screenWidthDp >= 600

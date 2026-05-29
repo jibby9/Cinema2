@@ -61,8 +61,8 @@ class PlayerPreferenceManager(private val context: Context) {
         val KEY_IPTV_CHANNEL_SORT_MODE = stringPreferencesKey("iptv_channel_sort_mode")
         val KEY_IPTV_CHANNEL_ORDER = stringPreferencesKey("iptv_channel_order")
 
-        // Recent Local Video paths saved
-        val KEY_LOCAL_RECENT_VIDEOS = stringPreferencesKey("local_recent_videos_json")
+        // IPTV History saved
+        val KEY_IPTV_HISTORY_JSON = stringPreferencesKey("iptv_history_json")
 
         // Animation Toggle
         val KEY_ANIMATION_ENABLED = booleanPreferencesKey("animation_enabled")
@@ -122,18 +122,18 @@ class PlayerPreferenceManager(private val context: Context) {
     }
 
     /**
-     * Local playback: List of recent local videos loaded inside the app
+     * IPTV History: Serialized list of recently watched IPTV channels
      */
-    val localRecentVideosJson: Flow<String?> = context.dataStore.data.map { preferences ->
-        preferences[KEY_LOCAL_RECENT_VIDEOS]
+    val iptvHistoryJson: Flow<String?> = context.dataStore.data.map { preferences ->
+        preferences[KEY_IPTV_HISTORY_JSON]
     }
 
-    suspend fun saveLocalRecentVideosJson(jsonString: String?) {
+    suspend fun saveIptvHistoryJson(jsonString: String?) {
         context.dataStore.edit { preferences ->
             if (jsonString == null) {
-                preferences.remove(KEY_LOCAL_RECENT_VIDEOS)
+                preferences.remove(KEY_IPTV_HISTORY_JSON)
             } else {
-                preferences[KEY_LOCAL_RECENT_VIDEOS] = jsonString
+                preferences[KEY_IPTV_HISTORY_JSON] = jsonString
             }
         }
     }
