@@ -41,11 +41,25 @@ object SharedPlayerSessionManager {
             val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
                 .setUserAgent("CinemaPlayer/1.1 (Android; Media3; ExoPlayer)")
                 .setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(8000) // fail fast on dead IPTV links
+                .setReadTimeoutMs(8000)
             val defaultDataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
             val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(defaultDataSourceFactory)
 
+            // Setup ultra-low latency buffering control optimized for live IPTV zapping
+            val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                    2000,  // minBufferMs (standard is 50s. 2s is highly secure yet instant)
+                    10000, // maxBufferMs (standard is 50s. 10s prevents loading massive backlog)
+                    1000,  // bufferForPlaybackMs (lowers startup waiting to 1s)
+                    1500   // bufferForPlaybackAfterRebufferMs (fast recovery on stutters)
+                )
+                .setPrioritizeTimeOverSizeThresholds(true)
+                .build()
+
             player = ExoPlayer.Builder(context)
                 .setMediaSourceFactory(mediaSourceFactory)
+                .setLoadControl(loadControl)
                 .build().apply {
                     playWhenReady = true
                 }
@@ -149,6 +163,8 @@ fun VideoPlayerView(
 
             if (!isSameSource) {
                 isLoading = true
+                // Implement zapping debounce to absorb rapid sequential clicks without hitting the network/player repeatedly
+                kotlinx.coroutines.delay(200)
                 try {
                     val mediaItem = MediaItem.fromUri(videoUrl)
                     exoPlayer.stop()
@@ -160,6 +176,7 @@ fun VideoPlayerView(
                     SharedPlayerSessionManager.lastUrl = videoUrl
                     SharedPlayerSessionManager.lastHeaders = headers
                 } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     isLoading = false
                     onPlaybackError(e.localizedMessage ?: "Preparation failed")
                 }

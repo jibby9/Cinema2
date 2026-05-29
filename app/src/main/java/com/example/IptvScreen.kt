@@ -388,7 +388,7 @@ fun IptvChannelsTab(
                 )
             }
 
-            items(categories) { cat ->
+            items(categories, key = { it.id }) { cat ->
                 val isSelected = selectedCategory?.id == cat.id
                 FilterChip(
                     selected = isSelected,
@@ -710,7 +710,7 @@ fun IptvGuideTab(
                 )
             }
 
-            items(categories) { cat ->
+            items(categories, key = { it.id }) { cat ->
                 val isSelected = selectedCategory?.id == cat.id
                 FilterChip(
                     selected = isSelected,
@@ -1871,7 +1871,10 @@ fun CategoryManagementDialog(
                             .weight(1f),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        items(sortedCategories.size) { index ->
+                        items(
+                            count = sortedCategories.size,
+                            key = { index -> sortedCategories[index].id }
+                        ) { index ->
                             val cat = sortedCategories[index]
                             val isHidden = hiddenIds.contains(cat.id)
 

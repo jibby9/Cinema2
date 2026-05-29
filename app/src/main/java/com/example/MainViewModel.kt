@@ -101,6 +101,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _activeIptvTab.value = tab
     }
 
+    private val _isTosAccepted = MutableStateFlow(false)
+    val isTosAccepted: StateFlow<Boolean> = _isTosAccepted.asStateFlow()
+
+    private val _tosAcceptedTimestamp = MutableStateFlow(0L)
+    val tosAcceptedTimestamp: StateFlow<Long> = _tosAcceptedTimestamp.asStateFlow()
+
+    fun acceptTos() {
+        viewModelScope.launch {
+            preferenceManager.saveTosAccepted(true)
+        }
+    }
+
+    private val _isPermissionsPrompted = MutableStateFlow(false)
+    val isPermissionsPrompted: StateFlow<Boolean> = _isPermissionsPrompted.asStateFlow()
+
+    fun dismissPermissionsPrompt() {
+        viewModelScope.launch {
+            preferenceManager.savePermissionsPrompted(true)
+        }
+    }
+
     private val _xtreamAccounts = MutableStateFlow<List<XtreamAccount>>(emptyList())
     val xtreamAccounts: StateFlow<List<XtreamAccount>> = _xtreamAccounts.asStateFlow()
 
@@ -264,6 +285,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             preferenceManager.isIptvModeActive.collect { active ->
                 _isIptvModeActive.value = active
+                if (active) {
+                    // Defer cold start loading slightly to allow core UI setup to render smoothly first
+                    kotlinx.coroutines.delay(400)
+                    loadActiveIptvSource()
+                }
             }
         }
 
@@ -320,14 +346,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             preferenceManager.xtreamAccountsJson.collect { json ->
                 _xtreamAccounts.value = deserializeAccounts(json)
-                loadActiveIptvSource()
+                if (_isIptvModeActive.value) {
+                    loadActiveIptvSource()
+                }
             }
         }
 
         viewModelScope.launch {
             preferenceManager.m3uPlaylistsJson.collect { json ->
                 _m3uPlaylists.value = deserializeM3uConfigs(json)
-                loadActiveIptvSource()
+                if (_isIptvModeActive.value) {
+                    loadActiveIptvSource()
+                }
             }
         }
 
@@ -343,6 +373,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             preferenceManager.lastChannelId.collect { id ->
                 _lastChannelId.value = id
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.isTosAccepted.collect { accepted ->
+                _isTosAccepted.value = accepted
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.tosAcceptedTimestamp.collect { ts ->
+                _tosAcceptedTimestamp.value = ts
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.isPermissionsPrompted.collect { prompted ->
+                _isPermissionsPrompted.value = prompted
             }
         }
 
@@ -1030,6 +1078,101 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- Loading channels engine ---
 
+    private var activeLoadJob: kotlinx.coroutines.Job? = null
+
+    private fun getActiveSourceId(): String? {
+        val activeXtream = _xtreamAccounts.value.find { it.isActive }
+        if (activeXtream != null) {
+            return "xtream_" + java.util.UUID.nameUUIDFromBytes("${activeXtream.serverUrl}_${activeXtream.username}".toByteArray()).toString()
+        }
+        val activeM3u = _m3uPlaylists.value.find { it.isActive }
+        if (activeM3u != null) {
+            return "m3u_" + java.util.UUID.nameUUIDFromBytes(activeM3u.playlistUrl.toByteArray()).toString()
+        }
+        return null
+    }
+
+    private fun saveChannelsToLocalCache(sourceId: String, categories: List<IptvCategory>, channels: List<IptvChannel>) {
+        try {
+            val file = java.io.File(getApplication<Application>().cacheDir, "iptv_cache_$sourceId.json")
+            val root = org.json.JSONObject()
+            
+            val catsArr = org.json.JSONArray()
+            for (c in categories) {
+                val obj = org.json.JSONObject()
+                obj.put("id", c.id)
+                obj.put("name", c.name)
+                obj.put("type", c.type)
+                catsArr.put(obj)
+            }
+            root.put("categories", catsArr)
+            
+            val chanArr = org.json.JSONArray()
+            for (ch in channels) {
+                val obj = org.json.JSONObject()
+                obj.put("id", ch.id)
+                obj.put("name", ch.name)
+                obj.put("logoUrl", ch.logoUrl ?: "")
+                obj.put("streamUrl", ch.streamUrl)
+                obj.put("categoryId", ch.categoryId)
+                obj.put("epgId", ch.epgId ?: "")
+                chanArr.put(obj)
+            }
+            root.put("channels", chanArr)
+            
+            file.writeText(root.toString())
+            Log.d(TAG, "Cached IPTV source $sourceId locally: ${categories.size} categories and ${channels.size} channels.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed writing IPTV channels to cache", e)
+        }
+    }
+
+    private fun loadChannelsFromLocalCache(sourceId: String): Pair<List<IptvCategory>, List<IptvChannel>>? {
+        try {
+            val file = java.io.File(getApplication<Application>().cacheDir, "iptv_cache_$sourceId.json")
+            if (!file.exists()) return null
+            
+            val json = file.readText()
+            val root = org.json.JSONObject(json)
+            
+            val catsArr = root.getJSONArray("categories")
+            val categories = mutableListOf<IptvCategory>()
+            for (i in 0 until catsArr.length()) {
+                val obj = catsArr.getJSONObject(i)
+                categories.add(
+                    IptvCategory(
+                        id = obj.getString("id"),
+                        name = obj.getString("name"),
+                        type = obj.optString("type", "live")
+                    )
+                )
+            }
+            
+            val chanArr = root.getJSONArray("channels")
+            val channels = mutableListOf<IptvChannel>()
+            val favorites = _favoriteChannelIds.value
+            for (i in 0 until chanArr.length()) {
+                val obj = chanArr.getJSONObject(i)
+                val id = obj.getString("id")
+                channels.add(
+                    IptvChannel(
+                        id = id,
+                        name = obj.getString("name"),
+                        logoUrl = obj.optString("logoUrl").takeIf { it.isNotBlank() },
+                        streamUrl = obj.getString("streamUrl"),
+                        categoryId = obj.optString("categoryId", ""),
+                        epgId = obj.optString("epgId").takeIf { it.isNotBlank() },
+                        isFavorite = favorites.contains(id)
+                    )
+                )
+            }
+            return Pair(categories, channels)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed reading IPTV channels from cache", e)
+            return null
+        }
+    }
+
     fun loadActiveIptvSource() {
         val activeXtream = _xtreamAccounts.value.find { it.isActive }
         val activeM3u = _m3uPlaylists.value.find { it.isActive }
@@ -1056,11 +1199,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        activeLoadJob?.cancel()
+        activeLoadJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             _isIptvLoading.value = true
             _iptvErrorMessage.value = null
 
-            // Try rendering instantaneous cached EPG first!
+            // 1. Try rendering instantaneous cached EPG first!
             try {
                 val cached = loadEpgFromLocalCache()
                 if (cached.isNotEmpty()) {
@@ -1070,6 +1214,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.e(TAG, "Local EPG cache initial load failed", e)
             }
 
+            // 2. Try to load local source cache (channels & categories) for instant UI
+            val sourceId = getActiveSourceId()
+            var hasLoadedFromCache = false
+            if (sourceId != null) {
+                try {
+                    val cachedSource = loadChannelsFromLocalCache(sourceId)
+                    if (cachedSource != null && cachedSource.second.isNotEmpty()) {
+                        val (cats, channels) = cachedSource
+                        _iptvCategories.value = cats
+                        _iptvChannels.value = channels
+                        
+                        val currentCategory = _selectedCategory.value
+                        if (currentCategory == null || !cats.any { it.id == currentCategory.id }) {
+                            _selectedCategory.value = cats.firstOrNull()
+                        }
+                        hasLoadedFromCache = true
+                        
+                        // Auto-resume channel if returning/loading
+                        val lastId = _lastChannelId.value
+                        if (lastId != null && _currentPlayingChannel.value == null && _isIptvModeActive.value) {
+                            val match = channels.find { it.id == lastId }
+                            if (match != null) {
+                                viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                                    playIptvChannel(match)
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to load channel cache on startup", e)
+                }
+            }
+
+            // 3. Progressive fetch from network with robust, crash-proof exception handling
             try {
                 if (activeXtream != null) {
                     val rawCats = IptvClient.fetchXtreamCategories(
@@ -1083,30 +1261,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     var verifiedCats = rawCats
                     var channels = rawChannels.map { it.copy(isFavorite = favorites.contains(it.id)) }
 
-                    if (channels.isEmpty()) {
+                    if (channels.isEmpty() && !hasLoadedFromCache) {
                         _iptvErrorMessage.value = "This Xtream source currently has no online channels. Please check credentials or URL."
-                    } else if (verifiedCats.isEmpty()) {
-                        // Create a fallback category so channels aren't hidden
-                        val fallbackCat = IptvCategory(id = "xtream_default", name = "Default Category", type = "live")
-                        verifiedCats = listOf(fallbackCat)
-                        channels = channels.map { it.copy(categoryId = "xtream_default") }
-                    }
+                    } else if (channels.isNotEmpty()) {
+                        if (verifiedCats.isEmpty()) {
+                            // Create a fallback category so channels aren't hidden
+                            val fallbackCat = IptvCategory(id = "xtream_default", name = "Default Category", type = "live")
+                            verifiedCats = listOf(fallbackCat)
+                            channels = channels.map { it.copy(categoryId = "xtream_default") }
+                        }
 
-                    _iptvCategories.value = verifiedCats
-                    _iptvChannels.value = channels
-                    
-                    val currentCategory = _selectedCategory.value
-                    if (currentCategory == null || !verifiedCats.any { it.id == currentCategory.id }) {
-                        _selectedCategory.value = verifiedCats.firstOrNull()
-                    }
+                        _iptvCategories.value = verifiedCats
+                        _iptvChannels.value = channels
+                        
+                        if (sourceId != null) {
+                            saveChannelsToLocalCache(sourceId, verifiedCats, channels)
+                        }
 
-                    // Auto-resume channel if returning/loading
-                    val lastId = _lastChannelId.value
-                    if (lastId != null && _currentPlayingChannel.value == null && _isIptvModeActive.value) {
-                        val match = channels.find { it.id == lastId }
-                        if (match != null) {
-                            viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
-                                playIptvChannel(match)
+                        val currentCategory = _selectedCategory.value
+                        if (currentCategory == null || !verifiedCats.any { it.id == currentCategory.id }) {
+                            _selectedCategory.value = verifiedCats.firstOrNull()
+                        }
+
+                        // Auto-resume channel if returning/loading
+                        val lastId = _lastChannelId.value
+                        if (lastId != null && _currentPlayingChannel.value == null && _isIptvModeActive.value) {
+                            val match = channels.find { it.id == lastId }
+                            if (match != null) {
+                                viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                                    playIptvChannel(match)
+                                }
                             }
                         }
                     }
@@ -1123,30 +1307,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         var channels = rawChannels.map { it.copy(isFavorite = favorites.contains(it.id)) }
                         var verifiedCats = cats
 
-                        if (channels.isEmpty()) {
+                        if (channels.isEmpty() && !hasLoadedFromCache) {
                             _iptvErrorMessage.value = "No valid stream channels found in this playlist. Ensure lines have proper stream links."
-                        } else if (verifiedCats.isEmpty()) {
-                            // Create a fallback category
-                            val fallbackCat = IptvCategory(id = "m3u_default", name = "All Channels", type = "live")
-                            verifiedCats = listOf(fallbackCat)
-                            channels = channels.map { it.copy(categoryId = "m3u_default") }
-                        }
+                        } else if (channels.isNotEmpty()) {
+                            if (verifiedCats.isEmpty()) {
+                                // Create a fallback category
+                                val fallbackCat = IptvCategory(id = "m3u_default", name = "All Channels", type = "live")
+                                verifiedCats = listOf(fallbackCat)
+                                channels = channels.map { it.copy(categoryId = "m3u_default") }
+                            }
 
-                        _iptvCategories.value = verifiedCats
-                        _iptvChannels.value = channels
-                        
-                        val currentCategory = _selectedCategory.value
-                        if (currentCategory == null || !verifiedCats.any { it.id == currentCategory.id }) {
-                            _selectedCategory.value = verifiedCats.firstOrNull()
-                        }
+                            _iptvCategories.value = verifiedCats
+                            _iptvChannels.value = channels
+                            
+                            if (sourceId != null) {
+                                saveChannelsToLocalCache(sourceId, verifiedCats, channels)
+                            }
 
-                        // Auto-resume channel if returning/loading
-                        val lastId = _lastChannelId.value
-                        if (lastId != null && _currentPlayingChannel.value == null && _isIptvModeActive.value) {
-                            val match = channels.find { it.id == lastId }
-                            if (match != null) {
-                                viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
-                                    playIptvChannel(match)
+                            val currentCategory = _selectedCategory.value
+                            if (currentCategory == null || !verifiedCats.any { it.id == currentCategory.id }) {
+                                _selectedCategory.value = verifiedCats.firstOrNull()
+                            }
+
+                            // Auto-resume channel if returning/loading
+                            val lastId = _lastChannelId.value
+                            if (lastId != null && _currentPlayingChannel.value == null && _isIptvModeActive.value) {
+                                val match = channels.find { it.id == lastId }
+                                if (match != null) {
+                                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                                        playIptvChannel(match)
+                                    }
                                 }
                             }
                         }
@@ -1168,8 +1358,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "IPTV channel initialization stream error", e)
-                _iptvErrorMessage.value = "Import Failed: Unable to read playlist content (${e.localizedMessage})."
+                if (e is kotlinx.coroutines.CancellationException) {
+                    Log.d(TAG, "IPTV source loading job cancelled intentionally.")
+                    throw e
+                }
+                Log.e(TAG, "IPTV channel initialization stream/network error", e)
+                if (!hasLoadedFromCache) {
+                    _iptvErrorMessage.value = "Import Failed: Unable to read playlist content (${e.localizedMessage})."
+                }
             } finally {
                 _isIptvLoading.value = false
             }
