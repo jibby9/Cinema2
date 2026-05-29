@@ -190,21 +190,35 @@ object IptvParser {
                     }
                     XmlPullParser.END_TAG -> {
                         if (name == "programme") {
-                            if (currentChannelId != null && title != null && startTimeStr != null && endTimeStr != null) {
-                                val startMs = parseXmltvDate(startTimeStr)
-                                val endMs = parseXmltvDate(endTimeStr)
-                                
-                                if (endMs > thresholdTime) { // Filter old schedules to avoid OOM
-                                    programmes.add(
-                                        EpgProgramme(
-                                            channelId = currentChannelId,
-                                            title = title,
-                                            startMs = startMs,
-                                            endMs = endMs,
-                                            description = desc
-                                        )
-                                    )
+                            try {
+                                if (currentChannelId.isNullOrBlank()) {
+                                    Log.w(TAG, "Skipping EPG programme row: missing channelId")
+                                } else if (title.isNullOrBlank()) {
+                                    Log.w(TAG, "Skipping EPG programme row for channel '$currentChannelId': missing or blank title")
+                                } else {
+                                    val startMs = parseXmltvDate(startTimeStr)
+                                    if (startMs == null) {
+                                        Log.w(TAG, "Skipping EPG programme row for channel '$currentChannelId': missing or malformed start time '$startTimeStr'")
+                                    } else {
+                                        val endMs = parseXmltvDate(endTimeStr) ?: (startMs + 30 * 60 * 1000L).also {
+                                            Log.d(TAG, "EPG programme end time is missing or malformed for channel '$currentChannelId'. Using fallback of start + 30 minutes ('$endTimeStr')")
+                                        }
+                                        
+                                        if (endMs > thresholdTime) { // Filter old schedules to avoid OOM
+                                            programmes.add(
+                                                EpgProgramme(
+                                                    channelId = currentChannelId,
+                                                    title = title,
+                                                    startMs = startMs,
+                                                    endMs = endMs,
+                                                    description = desc
+                                                )
+                                            )
+                                        }
+                                    }
                                 }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error handling END_TAG 'programme' parsing row, skipping entry.", e)
                             }
                             currentChannelId = null
                             startTimeStr = null
@@ -225,24 +239,41 @@ object IptvParser {
     /**
      * Parse XMLTV formatted dates: 20260528070000 +0000 or 20260528070000
      */
-    fun parseXmltvDate(dateStr: String): Long {
+    fun parseXmltvDate(dateStr: String?): Long? {
+        if (dateStr.isNullOrBlank()) {
+            return null
+        }
         try {
             val cleanStr = dateStr.trim().replace("\\s+".toRegex(), " ")
             val parts = cleanStr.split(" ")
             val mainPart = parts[0] // "20260528070000"
             
-            if (mainPart.length < 8) return System.currentTimeMillis()
+            if (mainPart.length < 8) {
+                Log.w(TAG, "Malformed XMLTV date (too short): '$dateStr'")
+                return null
+            }
 
-            val year = mainPart.substring(0, 4).toInt()
-            val month = mainPart.substring(4, 6).toInt()
-            val day = mainPart.substring(6, 8).toInt()
-            val hour = if (mainPart.length >= 10) mainPart.substring(8, 10).toInt() else 0
-            val minute = if (mainPart.length >= 12) mainPart.substring(10, 12).toInt() else 0
-            val second = if (mainPart.length >= 14) mainPart.substring(12, 14).toInt() else 0
+            val year = mainPart.substring(0, 4).toIntOrNull() ?: return null
+            val month = mainPart.substring(4, 6).toIntOrNull() ?: return null
+            val day = mainPart.substring(6, 8).toIntOrNull() ?: return null
+            
+            if (month < 1 || month > 12 || day < 1 || day > 31) {
+                Log.w(TAG, "Malformed XMLTV date (out of range): '$dateStr'")
+                return null
+            }
+
+            val hour = if (mainPart.length >= 10) mainPart.substring(8, 10).toIntOrNull() ?: 0 else 0
+            val minute = if (mainPart.length >= 12) mainPart.substring(10, 12).toIntOrNull() ?: 0 else 0
+            val second = if (mainPart.length >= 14) mainPart.substring(12, 14).toIntOrNull() ?: 0 else 0
+
+            if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+                Log.w(TAG, "Malformed XMLTV date (time out of range): '$dateStr'")
+                return null
+            }
             
             val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+            calendar.clear()
             calendar.set(year, month - 1, day, hour, minute, second)
-            calendar.set(Calendar.MILLISECOND, 0)
             
             var timeMs = calendar.timeInMillis
             
@@ -250,15 +281,22 @@ object IptvParser {
                 val offsetPart = parts[1] // "+0000" or "-0500"
                 if (offsetPart.length == 5 && (offsetPart.startsWith("+") || offsetPart.startsWith("-"))) {
                     val sign = if (offsetPart.startsWith("+")) 1 else -1
-                    val hoursOffset = offsetPart.substring(1, 3).toInt()
-                    val minutesOffset = offsetPart.substring(3, 5).toInt()
-                    val totalOffsetMs = (hoursOffset * 3600 + minutesOffset * 60) * 1000L * sign
-                    timeMs -= totalOffsetMs // Normalize back to UTC epoch
+                    val hoursOffset = offsetPart.substring(1, 3).toIntOrNull()
+                    val minutesOffset = offsetPart.substring(3, 5).toIntOrNull()
+                    if (hoursOffset != null && minutesOffset != null) {
+                        val totalOffsetMs = (hoursOffset * 3600 + minutesOffset * 60) * 1000L * sign
+                        timeMs -= totalOffsetMs // Normalize back to UTC epoch
+                    } else {
+                        Log.w(TAG, "Malformed XMLTV date timezone offset numbers: '$dateStr'")
+                    }
+                } else {
+                    Log.w(TAG, "Malformed XMLTV date timezone offset format: '$dateStr'")
                 }
             }
             return timeMs
         } catch (e: Exception) {
-            return System.currentTimeMillis()
+            Log.w(TAG, "Exception parsing XMLTV date: '$dateStr'", e)
+            return null
         }
     }
 }

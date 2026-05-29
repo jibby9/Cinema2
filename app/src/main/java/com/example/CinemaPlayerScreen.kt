@@ -1387,7 +1387,7 @@ fun CinemaTheaterLayout(
                                                                 // Subtitles OFF Button
                                                                 Button(
                                                                     onClick = {
-                                                                        activePlayer?.trackSelectionParameters = activePlayer!!.trackSelectionParameters
+                                                                        val player = activePlayer; if (player == null) android.util.Log.w("CinemaPlayerScreen", "Subtitle action ignored: activePlayer is null") else player.trackSelectionParameters = player.trackSelectionParameters
                                                                             .buildUpon()
                                                                             .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT, true)
                                                                             .build()
@@ -1406,7 +1406,7 @@ fun CinemaTheaterLayout(
                                                                 // Subtitles Auto Button
                                                                 Button(
                                                                     onClick = {
-                                                                        activePlayer?.trackSelectionParameters = activePlayer!!.trackSelectionParameters
+                                                                        val player = activePlayer; if (player == null) android.util.Log.w("CinemaPlayerScreen", "Subtitle action ignored: activePlayer is null") else player.trackSelectionParameters = player.trackSelectionParameters
                                                                             .buildUpon()
                                                                             .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT, false)
                                                                             .clearOverridesOfType(androidx.media3.common.C.TRACK_TYPE_TEXT)
@@ -1449,7 +1449,7 @@ fun CinemaTheaterLayout(
                                                                         val selected = !isSubtitlesDisabled && track.isSelected
                                                                         Button(
                                                                             onClick = {
-                                                                                activePlayer?.trackSelectionParameters = activePlayer!!.trackSelectionParameters
+                                                                                val player = activePlayer; if (player == null) android.util.Log.w("CinemaPlayerScreen", "Subtitle action ignored: activePlayer is null") else player.trackSelectionParameters = player.trackSelectionParameters
                                                                                     .buildUpon()
                                                                                     .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT, false)
                                                                                     .setOverrideForType(
