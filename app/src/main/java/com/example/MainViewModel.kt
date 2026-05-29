@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
 
@@ -203,6 +204,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _epgProgrammes = MutableStateFlow<List<EpgProgramme>>(emptyList())
     val epgProgrammes: StateFlow<List<EpgProgramme>> = _epgProgrammes.asStateFlow()
+
+    private val _epgSearchQuery = MutableStateFlow("")
+    val epgSearchQuery: StateFlow<String> = _epgSearchQuery.asStateFlow()
+
+    fun setEpgSearchQuery(query: String) {
+        _epgSearchQuery.value = query
+    }
+
+    @kotlin.OptIn(kotlinx.coroutines.FlowPreview::class)
+    val epgSearchResults: StateFlow<List<SearchResultEpg>> = _epgSearchQuery
+        .debounce(300L)
+        .combine(_epgProgrammes) { query, programmes ->
+            Pair(query, programmes)
+        }
+        .combine(_iptvChannels) { queryProgs, channels ->
+            val query = queryProgs.first
+            val programmes = queryProgs.second
+            if (query.isBlank()) {
+                emptyList()
+            } else {
+                val chanMap = channels.associateBy { it.id }
+                val chanEpgMap = channels.filter { it.epgId != null }.associateBy { it.epgId!! }
+                
+                programmes.filter { prog ->
+                    val ch = chanMap[prog.channelId] ?: chanEpgMap[prog.channelId]
+                    val chName = ch?.name ?: ""
+                    prog.title.contains(query, ignoreCase = true) ||
+                    chName.contains(query, ignoreCase = true) ||
+                    (prog.description != null && prog.description.contains(query, ignoreCase = true))
+                }.map { prog ->
+                    val ch = chanMap[prog.channelId] ?: chanEpgMap[prog.channelId]
+                    SearchResultEpg(prog, ch)
+                }
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
 
     private val _isEpgLoading = MutableStateFlow(false)
     val isEpgLoading: StateFlow<Boolean> = _isEpgLoading.asStateFlow()

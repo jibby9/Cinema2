@@ -43,6 +43,11 @@ data class EpgProgramme(
     val description: String? = null
 )
 
+data class SearchResultEpg(
+    val programme: EpgProgramme,
+    val channel: IptvChannel?
+)
+
 enum class CategorySortMode(val displayName: String) {
     PROVIDER("Playlist Default"),
     CUSTOM("Custom Order"),

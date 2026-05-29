@@ -785,7 +785,7 @@ fun CinemaTheaterLayout(
         }
 
         // 3. Compute the adaptive player dimensions based on target area fraction (~0.96f)
-        val isMini = !isEpgGuideMode && isIptvActive && playableUri != null && showDebugPanel
+        val isMini = !isEpgGuideMode && isIptvActive && playableUri != null && showDebugPanel && (maxWidth < 600.dp)
 
         val aspectR = detectedRatio.coerceIn(0.3f, 3.5f) // sensible min/max bounds
         val miniWidthDp = if (maxWidth >= 600.dp) 240.dp else 180.dp

@@ -469,16 +469,22 @@ fun IptvChannelsTab(
                 )
             }
         } else {
+            val now = remember(epgList) { System.currentTimeMillis() }
+            val activeEpgMap = remember(epgList, now) {
+                val map = mutableMapOf<String, EpgProgramme>()
+                epgList.filter { now >= it.startMs && now <= it.endMs }.forEach { prog ->
+                    map[prog.channelId] = prog
+                }
+                map
+            }
+
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 items(filteredChannels, key = { it.id }) { ch ->
-                    // Find active EPG
-                    val activeEpg = remember(epgList, ch.id) {
-                        findActiveEpg(epgList, ch.id, ch.epgId)
-                    }
+                    val activeEpg = activeEpgMap[ch.epgId ?: ch.id]
 
                     IptvChannelListItem(
                         channel = ch,
@@ -554,14 +560,42 @@ fun IptvChannelListItem(
                 Text(
                     text = "LIVE: " + activeEpg.title,
                     color = IndigoPrimary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                
+                val sdf = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
+                val startStr = sdf.format(java.util.Date(activeEpg.startMs))
+                val endStr = sdf.format(java.util.Date(activeEpg.endMs))
+                
+                Text(
+                    text = "$startStr - $endStr",
+                    color = TextSilver.copy(alpha = 0.6f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                
+                // Show a mini progress bar if startMs and endMs are valid
+                val duration = activeEpg.endMs - activeEpg.startMs
+                if (duration > 0) {
+                    val progress = (System.currentTimeMillis() - activeEpg.startMs).toFloat() / duration
+                    val progressClamped = progress.coerceIn(0f, 1f)
+                    LinearProgressIndicator(
+                        progress = { progressClamped },
+                        color = IndigoPrimary,
+                        trackColor = Color.White.copy(alpha = 0.08f),
+                        modifier = Modifier
+                            .fillMaxWidth(0.85f)
+                            .padding(top = 2.dp)
+                            .height(2.5.dp)
+                            .clip(RoundedCornerShape(1.dp))
+                    )
+                }
             } else {
                 Text(
-                    text = "Live Stream",
+                    text = "No current programme",
                     color = TextMuted,
                     fontSize = 10.5.sp,
                     maxLines = 1
@@ -594,9 +628,11 @@ fun IptvGuideTab(
     val categories by viewModel.iptvCategories.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val searchQuery by viewModel.iptvSearchQuery.collectAsState()
+    val epgSearchQuery by viewModel.epgSearchQuery.collectAsState()
     val currentPlayingChannel by viewModel.currentPlayingChannel.collectAsState()
 
     var showSearchField by remember { mutableStateOf(false) }
+    var isEpgSearchSelected by remember { mutableStateOf(false) }
     var selectedProgDetail by remember { mutableStateOf<Pair<IptvChannel, EpgProgramme>?>(null) }
 
     val now = remember { System.currentTimeMillis() }
@@ -646,7 +682,7 @@ fun IptvGuideTab(
                 Icon(
                     imageVector = if (showSearchField) Icons.Default.Close else Icons.Default.Search,
                     contentDescription = "Search guide",
-                    tint = if (searchQuery.isNotBlank()) IndigoPrimary else Color.White,
+                    tint = if (searchQuery.isNotBlank() || epgSearchQuery.isNotBlank()) IndigoPrimary else Color.White,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -658,37 +694,208 @@ fun IptvGuideTab(
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut()
         ) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { viewModel.setIptvSearchQuery(it) },
-                placeholder = { Text("Filter guide channels...", fontSize = 12.sp, color = TextMuted) },
-                maxLines = 1,
-                trailingIcon = {
-                    if (searchQuery.isNotBlank()) {
-                        IconButton(onClick = { viewModel.setIptvSearchQuery("") }) {
-                            Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp))
-                        }
-                    }
-                },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedBorderColor = IndigoPrimary,
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
-                    focusedContainerColor = Color.Black.copy(alpha = 0.2f),
-                    unfocusedContainerColor = Color.Black.copy(alpha = 0.2f)
-                ),
-                shape = RoundedCornerShape(10.dp),
-                textStyle = LocalTextStyle.current.copy(fontSize = 13.sp),
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .height(48.dp)
-            )
+                    .padding(horizontal = 12.dp)
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(bottom = 6.dp)
+                ) {
+                    val activeChipColors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = IndigoPrimary,
+                        selectedLabelColor = Color.White,
+                        containerColor = Color.White.copy(alpha = 0.05f),
+                        labelColor = TextSilver
+                    )
+                    FilterChip(
+                        selected = !isEpgSearchSelected,
+                        onClick = { isEpgSearchSelected = false },
+                        label = { Text("Filter Channels", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        colors = activeChipColors
+                    )
+                    FilterChip(
+                        selected = isEpgSearchSelected,
+                        onClick = { isEpgSearchSelected = true },
+                        label = { Text("Search Shows (EPG)", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        colors = activeChipColors
+                    )
+                }
+
+                if (!isEpgSearchSelected) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { viewModel.setIptvSearchQuery(it) },
+                        placeholder = { Text("Filter guide channels...", fontSize = 12.sp, color = TextMuted) },
+                        maxLines = 1,
+                        trailingIcon = {
+                            if (searchQuery.isNotBlank()) {
+                                IconButton(onClick = { viewModel.setIptvSearchQuery("") }) {
+                                    Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = IndigoPrimary,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
+                            focusedContainerColor = Color.Black.copy(alpha = 0.2f),
+                            unfocusedContainerColor = Color.Black.copy(alpha = 0.2f)
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        textStyle = LocalTextStyle.current.copy(fontSize = 13.sp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .height(48.dp)
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = epgSearchQuery,
+                        onValueChange = { viewModel.setEpgSearchQuery(it) },
+                        placeholder = { Text("Search EPG programmes, channels, desc...", fontSize = 12.sp, color = TextMuted) },
+                        maxLines = 1,
+                        trailingIcon = {
+                            if (epgSearchQuery.isNotBlank()) {
+                                IconButton(onClick = { viewModel.setEpgSearchQuery("") }) {
+                                    Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = IndigoPrimary,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
+                            focusedContainerColor = Color.Black.copy(alpha = 0.2f),
+                            unfocusedContainerColor = Color.Black.copy(alpha = 0.2f)
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        textStyle = LocalTextStyle.current.copy(fontSize = 13.sp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .height(48.dp)
+                    )
+                }
+            }
         }
 
-        // Category selection chips
-        LazyRow(
+        if (isEpgSearchSelected && epgSearchQuery.isNotBlank()) {
+            val searchResults by viewModel.epgSearchResults.collectAsState()
+            
+            if (searchResults.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No shows or programmes found matching your search.",
+                        color = TextMuted,
+                        fontSize = pxToSp(13f),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentPadding = PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(
+                        items = searchResults,
+                        key = { "${it.programme.channelId}_${it.programme.startMs}_${it.programme.title}" }
+                    ) { result ->
+                        val prog = result.programme
+                        val ch = result.channel
+                        val sdf = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
+                        val startTime = sdf.format(java.util.Date(prog.startMs))
+                        val endTime = sdf.format(java.util.Date(prog.endMs))
+                        
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    if (ch != null) {
+                                        viewModel.playIptvChannel(ch)
+                                    }
+                                },
+                            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.04f)),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = prog.title,
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    
+                                    Text(
+                                        text = "$startTime - $endTime",
+                                        color = IndigoPrimary,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(start = 8.dp)
+                                    )
+                                }
+                                
+                                Spacer(modifier = Modifier.height(4.dp))
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Tv,
+                                        contentDescription = null,
+                                        tint = TextMuted,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = ch?.name ?: "Unknown Channel",
+                                        color = TextSilver,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                
+                                if (!prog.description.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = prog.description,
+                                        color = TextMuted,
+                                        fontSize = 11.5.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        lineHeight = 15.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Category selection chips
+            LazyRow(
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth()
@@ -1022,6 +1229,7 @@ fun IptvGuideTab(
                 }
             }
         }
+    }
     }
 
     // Programme Details dialog overlay
