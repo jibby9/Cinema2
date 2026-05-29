@@ -465,6 +465,15 @@ fun CinemaPlayerScreen(
                 )
             }
         }
+
+        val showEpgSorter by viewModel.showEpgSorter.collectAsState()
+        if (showEpgSorter) {
+            EPGSorterScreen(
+                viewModel = viewModel,
+                onDismiss = { viewModel.showEpgSorter(false) },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
 }
 
@@ -1038,19 +1047,12 @@ fun CinemaTheaterLayout(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                val syncConfig by viewModel.tickerSyncConfig.collectAsState()
-                val scoreState by viewModel.tickerScore.collectAsState()
-                val isTickerActive = scoreState != null
-                val tickerPaddingTop = if (isTickerActive && syncConfig.tickerPosition == TickerPosition.TOP) 100.dp else 0.dp
-                val tickerPaddingBottom = if (isTickerActive && syncConfig.tickerPosition == TickerPosition.BOTTOM) 100.dp else 0.dp
-
                 if (!playableUri.isNullOrBlank()) {
                     VideoPlayerView(
                         videoUrl = playableUri,
                         onPlaybackError = onPlaybackError,
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(top = tickerPaddingTop, bottom = tickerPaddingBottom),
+                            .fillMaxSize(),
                         headers = headers,
                         displayMode = activeResizeMode,
                         useController = !isIptvActive,
@@ -1059,16 +1061,6 @@ fun CinemaTheaterLayout(
                         },
                         onPlayerInitialized = { activePlayer = it }
                     )
-
-                    if (isTickerActive) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .align(if (syncConfig.tickerPosition == TickerPosition.TOP) Alignment.TopCenter else Alignment.BottomCenter)
-                        ) {
-                            LiveSportsTickerUI(viewModel = viewModel)
-                        }
-                    }
 
                     // Overlay / Tap handling inside player for IPTV mode
                     if (isIptvActive && !isMini) {

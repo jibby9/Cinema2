@@ -39,6 +39,11 @@ private val DeepSlateBackground = Color(0xFF0F0D13)
 private val TextSilver = Color(0xFFE2E8F0)
 private val TextMuted = Color(0xFF64748B)
 
+data class DisplayGroup(
+    val category: IptvCategory,
+    val channels: List<IptvChannel>
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FullscreenSkyGuide(
@@ -56,6 +61,10 @@ fun FullscreenSkyGuide(
     val isEpgLoading by viewModel.isEpgLoading.collectAsState()
     val epgLoadStatus by viewModel.epgLoadStatus.collectAsState()
     val playableUri by viewModel.playableUri.collectAsState()
+
+    val categorySortMode by viewModel.categorySortMode.collectAsState()
+    val channelSortMode by viewModel.channelSortMode.collectAsState()
+    val customChannelOrder by viewModel.customChannelOrder.collectAsState()
 
     var activeDateOffset by remember { mutableStateOf(0) } // 0: Today, 1: Tomorrow, 2: Day+2, etc.
     var showSearchField by remember { mutableStateOf(false) }
@@ -111,21 +120,97 @@ fun FullscreenSkyGuide(
         list
     }
 
-    // Filter channels
-    val filteredChannels = remember(channels, selectedCategory, searchQuery) {
-        channels.filter { channel ->
-            val catMatches = when (selectedCategory?.id) {
-                null -> true
-                "favorites_filter" -> channel.isFavorite
-                else -> channel.categoryId == selectedCategory?.id
+    // Filter & Sort Grouped EPG content
+    val displayGroups = remember(
+        channels,
+        categories,
+        selectedCategory,
+        searchQuery,
+        categorySortMode,
+        channelSortMode,
+        customChannelOrder
+    ) {
+        val selCat = selectedCategory
+        fun sortChannels(list: List<IptvChannel>): List<IptvChannel> {
+            return when (channelSortMode) {
+                ChannelSortMode.PROVIDER -> {
+                    list.sortedBy { channels.indexOf(it) }
+                }
+                ChannelSortMode.CUSTOM -> {
+                    val orderMap = customChannelOrder.withIndex().associate { it.value to it.index }
+                    list.sortedWith(
+                        compareBy<IptvChannel> { orderMap[it.id] ?: Int.MAX_VALUE }
+                            .thenBy { channels.indexOf(it) }
+                    )
+                }
+                ChannelSortMode.NAME_AZ -> {
+                    list.sortedBy { it.name.lowercase() }
+                }
+                ChannelSortMode.CHANNEL_NUMBER -> {
+                    list.sortedBy { ch ->
+                        val numberPart = ch.name.takeWhile { it.isDigit() }
+                        if (numberPart.isNotEmpty()) {
+                            numberPart.toIntOrNull() ?: channels.indexOf(ch)
+                        } else {
+                            channels.indexOf(ch)
+                        }
+                    }
+                }
+                ChannelSortMode.FAVORITES_FIRST -> {
+                    list.sortedWith(
+                        compareByDescending<IptvChannel> { it.isFavorite }
+                            .thenBy { channels.indexOf(it) }
+                    )
+                }
             }
-            val queryMatches = if (searchQuery.isBlank()) {
-                true
-            } else {
-                channel.name.contains(searchQuery, ignoreCase = true)
-            }
-            catMatches && queryMatches
         }
+
+        val matchingChannels = if (searchQuery.isBlank()) {
+            channels
+        } else {
+            channels.filter { it.name.contains(searchQuery, ignoreCase = true) }
+        }
+
+        when {
+            selCat?.id == "favorites_filter" -> {
+                val favChs = matchingChannels.filter { it.isFavorite }
+                if (favChs.isNotEmpty()) {
+                    listOf(DisplayGroup(IptvCategory("favorites_filter", "⭐ Favorites"), sortChannels(favChs)))
+                } else {
+                    emptyList()
+                }
+            }
+            selCat != null -> {
+                val catChs = matchingChannels.filter { it.categoryId == selCat.id }
+                if (catChs.isNotEmpty()) {
+                    listOf(DisplayGroup(selCat, sortChannels(catChs)))
+                } else {
+                    emptyList()
+                }
+            }
+            else -> {
+                val grouped = matchingChannels.groupBy { it.categoryId }
+                val groups = categories.mapNotNull { cat ->
+                    val catChs = grouped[cat.id] ?: emptyList()
+                    if (catChs.isNotEmpty()) {
+                        DisplayGroup(cat, sortChannels(catChs))
+                    } else {
+                        null
+                    }
+                }
+                val categoryIds = categories.map { it.id }.toSet()
+                val uncategorizedChs = matchingChannels.filter { it.categoryId.isBlank() || !categoryIds.contains(it.categoryId) }
+                if (uncategorizedChs.isNotEmpty()) {
+                    groups + DisplayGroup(IptvCategory("uncategorized", "Uncategorized Channels"), sortChannels(uncategorizedChs))
+                } else {
+                    groups
+                }
+            }
+        }
+    }
+
+    val filteredChannels = remember(displayGroups) {
+        displayGroups.flatMap { it.channels }
     }
 
     // Auto center timeline to CURRENT TIME on load/date change

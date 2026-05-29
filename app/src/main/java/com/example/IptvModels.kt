@@ -42,3 +42,18 @@ data class EpgProgramme(
     val endMs: Long,
     val description: String? = null
 )
+
+enum class CategorySortMode(val displayName: String) {
+    PROVIDER("Playlist Default"),
+    CUSTOM("Custom Order"),
+    NAME_AZ("Name A-Z"),
+    FAVORITES_FIRST("Favorites First")
+}
+
+enum class ChannelSortMode(val displayName: String) {
+    PROVIDER("Playlist Default"),
+    CUSTOM("Custom Order"),
+    NAME_AZ("Name A-Z"),
+    CHANNEL_NUMBER("Channel Number"),
+    FAVORITES_FIRST("Favorites First")
+}

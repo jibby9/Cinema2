@@ -123,19 +123,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _hiddenCategoryIds = MutableStateFlow<Set<String>>(emptySet())
     val hiddenCategoryIds: StateFlow<Set<String>> = _hiddenCategoryIds.asStateFlow()
 
+    private val _categorySortMode = MutableStateFlow(CategorySortMode.PROVIDER)
+    val categorySortMode: StateFlow<CategorySortMode> = _categorySortMode.asStateFlow()
+
+    private val _showEpgSorter = MutableStateFlow(false)
+    val showEpgSorter: StateFlow<Boolean> = _showEpgSorter.asStateFlow()
+
+    private val _channelSortMode = MutableStateFlow(ChannelSortMode.PROVIDER)
+    val channelSortMode: StateFlow<ChannelSortMode> = _channelSortMode.asStateFlow()
+
+    private val _customChannelOrder = MutableStateFlow<List<String>>(emptyList())
+    val customChannelOrder: StateFlow<List<String>> = _customChannelOrder.asStateFlow()
+
     val allRawIptvCategories: StateFlow<List<IptvCategory>> = _iptvCategories.asStateFlow()
 
     val iptvCategories: StateFlow<List<IptvCategory>> = combine(
         _iptvCategories,
         _customCategoryOrder,
-        _hiddenCategoryIds
-    ) { rawCats, order, hiddenIds ->
+        _hiddenCategoryIds,
+        _categorySortMode
+    ) { rawCats, order, hiddenIds, sortMode ->
         val visibleCats = rawCats.filter { !hiddenIds.contains(it.id) }
-        val orderMap = order.withIndex().associate { it.value to it.index }
-        visibleCats.sortedWith(
-            compareBy<IptvCategory> { orderMap[it.id] ?: Int.MAX_VALUE }
-                .thenBy { rawCats.indexOf(it) }
-        )
+        when (sortMode) {
+            CategorySortMode.PROVIDER -> {
+                visibleCats
+            }
+            CategorySortMode.CUSTOM -> {
+                val orderMap = order.withIndex().associate { it.value to it.index }
+                visibleCats.sortedWith(
+                    compareBy<IptvCategory> { orderMap[it.id] ?: Int.MAX_VALUE }
+                        .thenBy { rawCats.indexOf(it) }
+                )
+            }
+            CategorySortMode.NAME_AZ -> {
+                visibleCats.sortedBy { it.name.lowercase() }
+            }
+            CategorySortMode.FAVORITES_FIRST -> {
+                visibleCats.sortedWith(
+                    compareByDescending<IptvCategory> { it.name.contains("Favorites", ignoreCase = true) || it.id.contains("fav", ignoreCase = true) }
+                        .thenBy { it.name.lowercase() }
+                )
+            }
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _iptvChannels = MutableStateFlow<List<IptvChannel>>(emptyList())
@@ -259,6 +288,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             preferenceManager.iptvCategoryOrder.collect { order ->
                 _customCategoryOrder.value = order
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.iptvCategorySortMode.collect { modeStr ->
+                _categorySortMode.value = try {
+                    CategorySortMode.valueOf(modeStr)
+                } catch (e: Exception) {
+                    CategorySortMode.PROVIDER
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.iptvChannelSortMode.collect { modeStr ->
+                _channelSortMode.value = try {
+                    ChannelSortMode.valueOf(modeStr)
+                } catch (e: Exception) {
+                    ChannelSortMode.PROVIDER
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            preferenceManager.iptvChannelOrder.collect { order ->
+                _customChannelOrder.value = order
             }
         }
 
@@ -1171,6 +1226,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // --- Custom Categories Management ---
+
+    fun showEpgSorter(show: Boolean) {
+        _showEpgSorter.value = show
+    }
+
+    fun setCategorySortMode(mode: CategorySortMode) {
+        viewModelScope.launch {
+            _categorySortMode.value = mode
+            preferenceManager.saveIptvCategorySortMode(mode.name)
+        }
+    }
+
+    fun setChannelSortMode(mode: ChannelSortMode) {
+        viewModelScope.launch {
+            _channelSortMode.value = mode
+            preferenceManager.saveIptvChannelSortMode(mode.name)
+        }
+    }
+
+    fun updateIptvChannelOrder(newOrder: List<String>) {
+        viewModelScope.launch {
+            _customChannelOrder.value = newOrder
+            preferenceManager.saveIptvChannelOrder(newOrder)
+        }
+    }
 
     fun updateIptvCategoryOrder(newOrder: List<String>) {
         viewModelScope.launch {

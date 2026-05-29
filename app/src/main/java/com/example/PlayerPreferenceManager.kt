@@ -56,6 +56,11 @@ class PlayerPreferenceManager(private val context: Context) {
         val KEY_IPTV_CATEGORY_ORDER = stringPreferencesKey("iptv_category_order")
         val KEY_IPTV_HIDDEN_CATEGORIES = stringSetPreferencesKey("iptv_hidden_categories")
 
+        // IPTV Sort modes and custom channel order
+        val KEY_IPTV_CATEGORY_SORT_MODE = stringPreferencesKey("iptv_category_sort_mode")
+        val KEY_IPTV_CHANNEL_SORT_MODE = stringPreferencesKey("iptv_channel_sort_mode")
+        val KEY_IPTV_CHANNEL_ORDER = stringPreferencesKey("iptv_channel_order")
+
         // Recent Local Video paths saved
         val KEY_LOCAL_RECENT_VIDEOS = stringPreferencesKey("local_recent_videos_json")
 
@@ -83,6 +88,36 @@ class PlayerPreferenceManager(private val context: Context) {
     suspend fun saveIptvHiddenCategoryIds(hiddenSet: Set<String>) {
         context.dataStore.edit { preferences ->
             preferences[KEY_IPTV_HIDDEN_CATEGORIES] = hiddenSet
+        }
+    }
+
+    val iptvCategorySortMode: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[KEY_IPTV_CATEGORY_SORT_MODE] ?: "PROVIDER"
+    }
+
+    suspend fun saveIptvCategorySortMode(modeName: String) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_IPTV_CATEGORY_SORT_MODE] = modeName
+        }
+    }
+
+    val iptvChannelSortMode: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[KEY_IPTV_CHANNEL_SORT_MODE] ?: "PROVIDER"
+    }
+
+    suspend fun saveIptvChannelSortMode(modeName: String) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_IPTV_CHANNEL_SORT_MODE] = modeName
+        }
+    }
+
+    val iptvChannelOrder: Flow<List<String>> = context.dataStore.data.map { preferences ->
+        preferences[KEY_IPTV_CHANNEL_ORDER]?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
+    }
+
+    suspend fun saveIptvChannelOrder(order: List<String>) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_IPTV_CHANNEL_ORDER] = order.joinToString(",")
         }
     }
 

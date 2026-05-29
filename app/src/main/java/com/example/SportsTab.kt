@@ -32,11 +32,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 
 // Color Constants matching Cinema Player
 private val IndigoPrimary = Color(0xFF6366F1)
 private val ObsidianSurface = Color(0xFF0F172A)
 private val TextMuted = Color(0xFF94A3B8)
+private val TextSilver = Color(0xFFE2E8F0)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,6 +54,8 @@ fun SportsTab(
     val selectedFilter by viewModel.selectedSportFilter.collectAsState()
     val searchQuery by viewModel.sportsSearchQuery.collectAsState()
     val liveNowOnly by viewModel.liveNowOnly.collectAsState()
+
+    var showDiagnosticsDialog by remember { mutableStateOf(false) }
 
     // Filter available sport names dynamically from the event database plus static ones
     val staticSports = listOf(
@@ -194,6 +199,80 @@ fun SportsTab(
                     modifier = Modifier.size(18.dp)
                 )
             }
+
+            // Diagnostics active logs explorer
+            IconButton(
+                onClick = {
+                    showDiagnosticsDialog = true
+                },
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(Color.White.copy(alpha = 0.04f), shape = RoundedCornerShape(12.dp))
+                    .testTag("sports_diagnostics_btn")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = "Diagnostics Logs",
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        // Integrity logs dialog popup rendering
+        if (showDiagnosticsDialog) {
+            val logs = remember { FixtureDiagnostics.getLogs() }
+            AlertDialog(
+                onDismissRequest = { showDiagnosticsDialog = false },
+                confirmButton = {
+                    TextButton(onClick = { showDiagnosticsDialog = false }) {
+                        Text("Dismiss", color = IndigoPrimary)
+                    }
+                },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.BugReport, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.padding(end = 8.dp))
+                        Text("Fixture Integrity Logs", color = Color.White)
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Below is the normalization, deduplication, and confidence grading trace for current sports feeds:", color = TextSilver, fontSize = 11.sp)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 350.dp)
+                                .background(Color.Black, shape = RoundedCornerShape(8.dp))
+                                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+                                .padding(10.dp)
+                        ) {
+                            if (logs.isEmpty()) {
+                                Text("No telemetry logs recorded.", color = TextMuted, fontSize = 11.sp)
+                            } else {
+                                LazyColumn {
+                                    items(logs) { line ->
+                                        Text(
+                                            text = line,
+                                            color = when {
+                                                line.contains("REJECTED") -> Color(0xFFEF4444)
+                                                line.contains("SUPPRESSED") -> Color(0xFFEF4444)
+                                                line.contains("DUPLICATE") -> Color(0xFFF59E0B)
+                                                line.contains("DEDUPLICATED") -> Color(0xFFF59E0B)
+                                                line.contains("APPROVED") -> Color(0xFF10B981)
+                                                else -> TextSilver
+                                            },
+                                            fontSize = 9.5.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.padding(vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                containerColor = ObsidianSurface
+            )
         }
 
         // --- HORIZONTAL SPORTS FILTER CHIPS ---

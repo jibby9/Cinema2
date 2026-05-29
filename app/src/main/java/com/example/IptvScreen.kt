@@ -230,15 +230,10 @@ fun IptvChannelsTab(
     val searchQuery by viewModel.iptvSearchQuery.collectAsState()
     val epgList by viewModel.epgProgrammes.collectAsState()
 
-    var showSearchField by remember { mutableStateOf(false) }
-    var showCategoryManagerDialog by remember { mutableStateOf(false) }
+    val channelSortMode by viewModel.channelSortMode.collectAsState()
+    val customChannelOrder by viewModel.customChannelOrder.collectAsState()
 
-    if (showCategoryManagerDialog) {
-        CategoryManagementDialog(
-            viewModel = viewModel,
-            onDismiss = { showCategoryManagerDialog = false }
-        )
-    }
+    var showSearchField by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
         
@@ -318,7 +313,7 @@ fun IptvChannelsTab(
             }
 
             IconButton(
-                onClick = { showCategoryManagerDialog = true }
+                onClick = { viewModel.showEpgSorter(true) }
             ) {
                 Icon(
                     imageVector = Icons.Default.Settings,
@@ -419,8 +414,8 @@ fun IptvChannelsTab(
         }
 
         // Channels Lazy Column
-        val filteredChannels = remember(channels, selectedCategory, searchQuery) {
-            channels.filter { channel ->
+        val filteredChannels = remember(channels, selectedCategory, searchQuery, channelSortMode, customChannelOrder) {
+            val list = channels.filter { channel ->
                 val catMatches = when (selectedCategory?.id) {
                     null -> true
                     "favorites_filter" -> channel.isFavorite
@@ -432,6 +427,37 @@ fun IptvChannelsTab(
                     channel.name.contains(searchQuery, ignoreCase = true)
                 }
                 catMatches && queryMatches
+            }
+            when (channelSortMode) {
+                ChannelSortMode.PROVIDER -> {
+                    list
+                }
+                ChannelSortMode.CUSTOM -> {
+                    val orderMap = customChannelOrder.withIndex().associate { it.value to it.index }
+                    list.sortedWith(
+                        compareBy<IptvChannel> { orderMap[it.id] ?: Int.MAX_VALUE }
+                            .thenBy { channels.indexOf(it) }
+                    )
+                }
+                ChannelSortMode.NAME_AZ -> {
+                    list.sortedBy { it.name.lowercase() }
+                }
+                ChannelSortMode.CHANNEL_NUMBER -> {
+                    list.sortedBy { ch ->
+                        val numberPart = ch.name.takeWhile { it.isDigit() }
+                        if (numberPart.isNotEmpty()) {
+                            numberPart.toIntOrNull() ?: channels.indexOf(ch)
+                        } else {
+                            channels.indexOf(ch)
+                        }
+                    }
+                }
+                ChannelSortMode.FAVORITES_FIRST -> {
+                    list.sortedWith(
+                        compareByDescending<IptvChannel> { it.isFavorite }
+                            .thenBy { channels.indexOf(it) }
+                    )
+                }
             }
         }
 
