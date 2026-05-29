@@ -514,22 +514,92 @@ fun SportsEventCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = event.title,
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    // Head-to-Head team logos if available, else plain title
+                    if (!event.teamA.isNullOrBlank() && !event.teamB.isNullOrBlank() && (!event.teamABadge.isNullOrUrlEmpty() || !event.teamBBadge.isNullOrUrlEmpty())) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            // Team A
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (!event.teamABadge.isNullOrUrlEmpty()) {
+                                    AsyncImage(
+                                        model = event.teamABadge,
+                                        contentDescription = "${event.teamA} Badge",
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                                Text(
+                                    text = event.teamA,
+                                    color = Color.White,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            
+                            // Team B
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (!event.teamBBadge.isNullOrUrlEmpty()) {
+                                    AsyncImage(
+                                        model = event.teamBBadge,
+                                        contentDescription = "${event.teamB} Badge",
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                                Text(
+                                    text = event.teamB,
+                                    color = Color.White,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    } else {
+                        // Plain Title view
+                        Text(
+                            text = event.title,
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     
                     Text(
                         text = formatSportsEventTime(event.dateTimeMs),
                         color = TextMuted,
                         fontSize = 11.sp
                     )
+
+                    if (isExpanded) {
+                        if (!event.eventThumb.isNullOrUrlEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            AsyncImage(
+                                model = event.eventThumb,
+                                contentDescription = "${event.title} Banner",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(140.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                            )
+                        }
+                    }
 
                     if (event.description != null && isExpanded) {
                         Spacer(modifier = Modifier.height(6.dp))

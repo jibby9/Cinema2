@@ -203,7 +203,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val localVideoTitle: StateFlow<String?> = _localVideoTitle.asStateFlow()
 
     // Sports Schedule State fields
-    private val sportsRepository: SportsRepository = StaticSportsRepository()
+    private val sportsRepository: SportsRepository = StaticSportsRepository(application)
 
     private val _sportsEvents = MutableStateFlow<List<SportsEvent>>(emptyList())
     val sportsEvents: StateFlow<List<SportsEvent>> = _sportsEvents.asStateFlow()
@@ -1436,8 +1436,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshSportsEvents() {
-        sportsRepository.refreshEvents()
-        _sportsEvents.value = sportsRepository.getFeaturedEvents()
+        viewModelScope.launch {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                sportsRepository.refreshEvents()
+            }
+            _sportsEvents.value = sportsRepository.getFeaturedEvents()
+        }
     }
 
     fun getMatchingChannelsForEvent(event: SportsEvent): List<ChannelMatchResult> {
