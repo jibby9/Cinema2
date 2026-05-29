@@ -67,61 +67,6 @@ fun CinemaPlayerScreen(
     viewModel: MainViewModel,
     modifier: Modifier = Modifier
 ) {
-    val isTosAccepted by viewModel.isTosAccepted.collectAsState()
-    val isPermissionsPrompted by viewModel.isPermissionsPrompted.collectAsState()
-
-    if (!isTosAccepted) {
-        TosScreen(
-            onAccept = { viewModel.acceptTos() },
-            modifier = modifier
-        )
-        return
-    }
-
-    val context = LocalContext.current
-    var showPermissionRationale by remember { mutableStateOf(false) }
-
-    val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
-        onResult = { isGranted ->
-            viewModel.dismissPermissionsPrompt()
-        }
-    )
-
-    LaunchedEffect(isTosAccepted, isPermissionsPrompted) {
-        if (isTosAccepted && !isPermissionsPrompted) {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                val isAlreadyGranted = androidx.core.content.ContextCompat.checkSelfPermission(
-                    context,
-                    android.Manifest.permission.POST_NOTIFICATIONS
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                
-                if (!isAlreadyGranted) {
-                    showPermissionRationale = true
-                } else {
-                    viewModel.dismissPermissionsPrompt()
-                }
-            } else {
-                viewModel.dismissPermissionsPrompt()
-            }
-        }
-    }
-
-    if (showPermissionRationale) {
-        PermissionsRationaleDialog(
-            onDismiss = {
-                showPermissionRationale = false
-                viewModel.dismissPermissionsPrompt()
-            },
-            onGrantTrigger = {
-                showPermissionRationale = false
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                    notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                }
-            }
-        )
-    }
-
     val parsedIntent by viewModel.parsedIntent.collectAsState()
     val playableUri by viewModel.playableUri.collectAsState()
     val requestHeaders by viewModel.requestHeaders.collectAsState()
@@ -150,45 +95,6 @@ fun CinemaPlayerScreen(
     val configuration = LocalConfiguration.current
     val customBackgroundUri by viewModel.customBgUri.collectAsState()
     val activeReminderAlert by viewModel.activeReminderAlert.collectAsState()
-    val isInPictureInPicture by viewModel.isInPictureInPicture.collectAsState()
-
-    if (isInPictureInPicture) {
-        CinemaTheaterLayout(
-            viewModel = viewModel,
-            themePreset = activeThemePreset,
-            screenLayout = screenLayout.copy(dimAlpha = 0f),
-            playableUri = playableUri,
-            errorMessage = errorMessage,
-            headers = requestHeaders,
-            onPlayTestVideo = { viewModel.playTestVideo() },
-            onClearPlaySource = { viewModel.setPlayableUri(null) },
-            onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
-            isEditMode = false,
-            activeAspectRatioId = activeAspectRatioId,
-            activeResizeMode = activeResizeMode,
-            onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
-            isSettingsLoaded = isSettingsLoaded,
-            isIptvActive = isIptvModeActive,
-            channels = iptvChannels,
-            epgList = epgProgrammes,
-            currentPlayingChannel = currentPlayingChannel,
-            onPlayChannel = { ch -> viewModel.playIptvChannel(ch) },
-            onPlayNextChannel = { list -> viewModel.playNextIptvChannel(list) },
-            onPlayPreviousChannel = { list -> viewModel.playPreviousIptvChannel(list) },
-            onRecallPreviousChannel = { viewModel.recallPreviousIptvChannel() },
-            glowIntensitySetting = AmbientGlowSetting.OFF,
-            showDebugPanel = false,
-            onToggleDebug = {},
-            onSelectTab = {},
-            onLayoutChanged = { _, _, _, _ -> },
-            isEpgGuideMode = false,
-            isAnimationEnabled = false,
-            onToggleAnimation = {},
-            onSelectTheme = {},
-            modifier = modifier.fillMaxSize()
-        )
-        return
-    }
 
     // Screen classification: if screenWidthDp >= 600, treat as tablet or unfolded foldable inner display.
     val isExpandedLayout = configuration.screenWidthDp >= 600
@@ -1387,7 +1293,7 @@ fun CinemaTheaterLayout(
                                                                 // Subtitles OFF Button
                                                                 Button(
                                                                     onClick = {
-                                                                        val player = activePlayer; if (player == null) android.util.Log.w("CinemaPlayerScreen", "Subtitle action ignored: activePlayer is null") else player.trackSelectionParameters = player.trackSelectionParameters
+                                                                        activePlayer?.trackSelectionParameters = activePlayer!!.trackSelectionParameters
                                                                             .buildUpon()
                                                                             .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT, true)
                                                                             .build()
@@ -1406,7 +1312,7 @@ fun CinemaTheaterLayout(
                                                                 // Subtitles Auto Button
                                                                 Button(
                                                                     onClick = {
-                                                                        val player = activePlayer; if (player == null) android.util.Log.w("CinemaPlayerScreen", "Subtitle action ignored: activePlayer is null") else player.trackSelectionParameters = player.trackSelectionParameters
+                                                                        activePlayer?.trackSelectionParameters = activePlayer!!.trackSelectionParameters
                                                                             .buildUpon()
                                                                             .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT, false)
                                                                             .clearOverridesOfType(androidx.media3.common.C.TRACK_TYPE_TEXT)
@@ -1449,7 +1355,7 @@ fun CinemaTheaterLayout(
                                                                         val selected = !isSubtitlesDisabled && track.isSelected
                                                                         Button(
                                                                             onClick = {
-                                                                                val player = activePlayer; if (player == null) android.util.Log.w("CinemaPlayerScreen", "Subtitle action ignored: activePlayer is null") else player.trackSelectionParameters = player.trackSelectionParameters
+                                                                                activePlayer?.trackSelectionParameters = activePlayer!!.trackSelectionParameters
                                                                                     .buildUpon()
                                                                                     .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT, false)
                                                                                     .setOverrideForType(
@@ -1549,47 +1455,9 @@ fun CinemaTheaterLayout(
                                                                     uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
                                                                 ),
                                                                 modifier = Modifier.testTag("animated_backdrop_switch")
-                                                             )
-                                                         }
-                                                     }
-
-                                                     // SECTION 4: LEGAL & TERMS OF SERVICE
-                                                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                         Text(
-                                                             "4. LEGAL & GUIDELINES",
-                                                             color = Color.White.copy(alpha = 0.5f),
-                                                             fontSize = 10.sp,
-                                                             fontWeight = FontWeight.Bold,
-                                                             letterSpacing = 1.sp
-                                                         )
-                                                         var isReviewTosVisible by remember { mutableStateOf(false) }
-                                                         Button(
-                                                             onClick = { isReviewTosVisible = true },
-                                                             colors = ButtonDefaults.buttonColors(
-                                                                 containerColor = Color.White.copy(alpha = 0.05f),
-                                                                 contentColor = TextSilver
-                                                             ),
-                                                             shape = RoundedCornerShape(8.dp),
-                                                             modifier = Modifier.fillMaxWidth().height(36.dp)
-                                                         ) {
-                                                             Icon(
-                                                                 imageVector = Icons.Default.Info,
-                                                                 contentDescription = null,
-                                                                 tint = themePreset.primaryColor,
-                                                                 modifier = Modifier.size(14.dp)
-                                                             )
-                                                             Spacer(modifier = Modifier.width(6.dp))
-                                                             Text("Review Terms of Service", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                                         }
-                                                         
-                                                         val tosAcceptedTimestamp by viewModel.tosAcceptedTimestamp.collectAsState()
-                                                         if (isReviewTosVisible) {
-                                                             TosDetailsDialog(
-                                                                 onDismiss = { isReviewTosVisible = false },
-                                                                 acceptedTimestamp = tosAcceptedTimestamp
-                                                             )
-                                                         }
-                                                     }
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                             },
                                             confirmButton = {

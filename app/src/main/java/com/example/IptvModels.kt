@@ -57,26 +57,3 @@ enum class ChannelSortMode(val displayName: String) {
     CHANNEL_NUMBER("Channel Number"),
     FAVORITES_FIRST("Favorites First")
 }
-
-@JsonClass(generateAdapter = true)
-data class IptvHistoryItem(
-    val id: String,
-    val name: String,
-    val logoUrl: String? = null,
-    val streamUrl: String,
-    val categoryId: String = "",
-    val epgId: String? = null,
-    val lastWatchedTimestamp: Long = System.currentTimeMillis()
-) {
-    fun toIptvChannel(isFav: Boolean = false): IptvChannel {
-        return IptvChannel(
-            id = id,
-            name = name,
-            logoUrl = logoUrl,
-            streamUrl = streamUrl,
-            categoryId = categoryId,
-            epgId = epgId,
-            isFavorite = isFav
-        )
-    }
-}

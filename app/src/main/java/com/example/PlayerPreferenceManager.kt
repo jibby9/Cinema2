@@ -61,53 +61,11 @@ class PlayerPreferenceManager(private val context: Context) {
         val KEY_IPTV_CHANNEL_SORT_MODE = stringPreferencesKey("iptv_channel_sort_mode")
         val KEY_IPTV_CHANNEL_ORDER = stringPreferencesKey("iptv_channel_order")
 
-        // IPTV History saved
-        val KEY_IPTV_HISTORY_JSON = stringPreferencesKey("iptv_history_json")
+        // Recent Local Video paths saved
+        val KEY_LOCAL_RECENT_VIDEOS = stringPreferencesKey("local_recent_videos_json")
 
         // Animation Toggle
         val KEY_ANIMATION_ENABLED = booleanPreferencesKey("animation_enabled")
-
-        // Terms of Service Tracking
-        val KEY_TOS_ACCEPTED = booleanPreferencesKey("tos_accepted")
-        val KEY_TOS_ACCEPTED_TIMESTAMP = longPreferencesKey("tos_accepted_timestamp")
-
-        // Permissions Prompt Tracking
-        val KEY_PERMISSIONS_PROMPTED = booleanPreferencesKey("permissions_prompted")
-    }
-
-    /**
-     * Permissions Onboarding State
-     */
-    val isPermissionsPrompted: Flow<Boolean> = context.dataStore.data.map { preferences ->
-        preferences[KEY_PERMISSIONS_PROMPTED] ?: false
-    }
-
-    suspend fun savePermissionsPrompted(prompted: Boolean) {
-        context.dataStore.edit { preferences ->
-            preferences[KEY_PERMISSIONS_PROMPTED] = prompted
-        }
-    }
-
-    /**
-     * Terms of Service Acceptance Fields
-     */
-    val isTosAccepted: Flow<Boolean> = context.dataStore.data.map { preferences ->
-        preferences[KEY_TOS_ACCEPTED] ?: false
-    }
-
-    val tosAcceptedTimestamp: Flow<Long> = context.dataStore.data.map { preferences ->
-        preferences[KEY_TOS_ACCEPTED_TIMESTAMP] ?: 0L
-    }
-
-    suspend fun saveTosAccepted(accepted: Boolean) {
-        context.dataStore.edit { preferences ->
-            preferences[KEY_TOS_ACCEPTED] = accepted
-            if (accepted) {
-                preferences[KEY_TOS_ACCEPTED_TIMESTAMP] = System.currentTimeMillis()
-            } else {
-                preferences.remove(KEY_TOS_ACCEPTED_TIMESTAMP)
-            }
-        }
     }
 
     /**
@@ -164,18 +122,18 @@ class PlayerPreferenceManager(private val context: Context) {
     }
 
     /**
-     * IPTV History: Serialized list of recently watched IPTV channels
+     * Local playback: List of recent local videos loaded inside the app
      */
-    val iptvHistoryJson: Flow<String?> = context.dataStore.data.map { preferences ->
-        preferences[KEY_IPTV_HISTORY_JSON]
+    val localRecentVideosJson: Flow<String?> = context.dataStore.data.map { preferences ->
+        preferences[KEY_LOCAL_RECENT_VIDEOS]
     }
 
-    suspend fun saveIptvHistoryJson(jsonString: String?) {
+    suspend fun saveLocalRecentVideosJson(jsonString: String?) {
         context.dataStore.edit { preferences ->
             if (jsonString == null) {
-                preferences.remove(KEY_IPTV_HISTORY_JSON)
+                preferences.remove(KEY_LOCAL_RECENT_VIDEOS)
             } else {
-                preferences[KEY_IPTV_HISTORY_JSON] = jsonString
+                preferences[KEY_LOCAL_RECENT_VIDEOS] = jsonString
             }
         }
     }
@@ -210,19 +168,7 @@ class PlayerPreferenceManager(private val context: Context) {
      * IPTV: Saved Xtream accounts JSON string representation
      */
     val xtreamAccountsJson: Flow<String?> = context.dataStore.data.map { preferences ->
-        val saved = preferences[KEY_IPTV_XTREAM_ACCOUNTS_JSON] ?: return@map null
-        val decrypted = IptvSecurityManager.decrypt(saved)
-        if (decrypted != null) {
-            decrypted
-        } else {
-            // Decryption failed. Check if it starts with [ or { which indicates legacy unencrypted plain-text JSON
-            val trimmed = saved.trim()
-            if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
-                saved
-            } else {
-                null
-            }
-        }
+        preferences[KEY_IPTV_XTREAM_ACCOUNTS_JSON]
     }
 
     suspend fun saveXtreamAccountsJson(jsonString: String?) {
@@ -230,12 +176,7 @@ class PlayerPreferenceManager(private val context: Context) {
             if (jsonString == null) {
                 preferences.remove(KEY_IPTV_XTREAM_ACCOUNTS_JSON)
             } else {
-                val encrypted = IptvSecurityManager.encrypt(jsonString)
-                if (encrypted != null) {
-                    preferences[KEY_IPTV_XTREAM_ACCOUNTS_JSON] = encrypted
-                } else {
-                    preferences[KEY_IPTV_XTREAM_ACCOUNTS_JSON] = jsonString
-                }
+                preferences[KEY_IPTV_XTREAM_ACCOUNTS_JSON] = jsonString
             }
         }
     }
@@ -244,19 +185,7 @@ class PlayerPreferenceManager(private val context: Context) {
      * IPTV: Saved M3U playlists JSON string representation
      */
     val m3uPlaylistsJson: Flow<String?> = context.dataStore.data.map { preferences ->
-        val saved = preferences[KEY_IPTV_M3U_PLAYLISTS_JSON] ?: return@map null
-        val decrypted = IptvSecurityManager.decrypt(saved)
-        if (decrypted != null) {
-            decrypted
-        } else {
-            // Decryption failed. Check if it starts with [ or { which indicates legacy unencrypted plain-text JSON
-            val trimmed = saved.trim()
-            if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
-                saved
-            } else {
-                null
-            }
-        }
+        preferences[KEY_IPTV_M3U_PLAYLISTS_JSON]
     }
 
     suspend fun saveM3uPlaylistsJson(jsonString: String?) {
@@ -264,12 +193,7 @@ class PlayerPreferenceManager(private val context: Context) {
             if (jsonString == null) {
                 preferences.remove(KEY_IPTV_M3U_PLAYLISTS_JSON)
             } else {
-                val encrypted = IptvSecurityManager.encrypt(jsonString)
-                if (encrypted != null) {
-                    preferences[KEY_IPTV_M3U_PLAYLISTS_JSON] = encrypted
-                } else {
-                    preferences[KEY_IPTV_M3U_PLAYLISTS_JSON] = jsonString
-                }
+                preferences[KEY_IPTV_M3U_PLAYLISTS_JSON] = jsonString
             }
         }
     }
