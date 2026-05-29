@@ -955,21 +955,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isIptvLoading.value = true
             _iptvErrorMessage.value = null
 
+            val trimmedName = name.trim()
+            val trimmedUrl = playlistUrl.trim()
+
+            if (trimmedName.isBlank()) {
+                _iptvErrorMessage.value = "Configuration error: Playlist name cannot be empty."
+                _isIptvLoading.value = false
+                return@launch
+            }
+            if (trimmedUrl.isBlank()) {
+                _iptvErrorMessage.value = "Configuration error: Playlist URL cannot be empty."
+                _isIptvLoading.value = false
+                return@launch
+            }
+
+            if (!trimmedUrl.startsWith("http://", ignoreCase = true) && 
+                !trimmedUrl.startsWith("https://", ignoreCase = true)) {
+                _iptvErrorMessage.value = "Validation error: Invalid URL scheme. M3U URL must start with http:// or https://"
+                _isIptvLoading.value = false
+                return@launch
+            }
+
             try {
-                // Test stream load
-                IptvClient.fetchUrlStream(playlistUrl).use { /* test stream opens */ }
+                // Test playlist network stream connectivity and timeout bounds
+                IptvClient.fetchUrlStream(trimmedUrl).use { /* verify stream can be reached safely */ }
                 
                 // Deactivate others
                 val currentM3uList = _m3uPlaylists.value.map { it.copy(isActive = false) }.toMutableList()
                 val currentXtream = _xtreamAccounts.value.map { it.copy(isActive = false) }
                 preferenceManager.saveXtreamAccountsJson(serializeAccounts(currentXtream))
 
-                val newConfig = M3UConfig(name, playlistUrl, epgUrl, isActive = true)
+                val newConfig = M3UConfig(trimmedName, trimmedUrl, epgUrl?.trim()?.takeIf { it.isNotBlank() }, isActive = true)
                 currentM3uList.add(newConfig)
 
                 preferenceManager.saveM3uPlaylistsJson(serializeM3uConfigs(currentM3uList))
+                
+                // Triggers immediate loading of new source
+                viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                    loadActiveIptvSource()
+                }
             } catch (e: Exception) {
-                _iptvErrorMessage.value = "M3U file check failed: ${e.localizedMessage}"
+                Log.e(TAG, "M3U connection or parse initialization test failed", e)
+                _iptvErrorMessage.value = "Connection check failed: Unable to fetch source. Please verify URL is active."
             } finally {
                 _isIptvLoading.value = false
             }
@@ -1015,6 +1042,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        // Validate account details before spinning up dispatchers
+        if (activeXtream != null) {
+            if (activeXtream.serverUrl.isBlank() || activeXtream.username.isBlank()) {
+                _iptvErrorMessage.value = "Configuration error: Active Xtream Server URL or Username is blank."
+                return
+            }
+        }
+        if (activeM3u != null) {
+            if (activeM3u.playlistUrl.isBlank()) {
+                _iptvErrorMessage.value = "Configuration error: Active M3U playlist URL is blank."
+                return
+            }
+        }
+
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             _isIptvLoading.value = true
             _iptvErrorMessage.value = null
@@ -1031,21 +1072,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
                 if (activeXtream != null) {
-                    val cats = IptvClient.fetchXtreamCategories(
+                    val rawCats = IptvClient.fetchXtreamCategories(
                         activeXtream.serverUrl, activeXtream.username, activeXtream.password
                     )
                     val rawChannels = IptvClient.fetchXtreamChannels(
                         activeXtream.serverUrl, activeXtream.username, activeXtream.password
                     )
                     val favorites = _favoriteChannelIds.value
-                    val channels = rawChannels.map { it.copy(isFavorite = favorites.contains(it.id)) }
+                    
+                    var verifiedCats = rawCats
+                    var channels = rawChannels.map { it.copy(isFavorite = favorites.contains(it.id)) }
 
-                    _iptvCategories.value = cats
+                    if (channels.isEmpty()) {
+                        _iptvErrorMessage.value = "This Xtream source currently has no online channels. Please check credentials or URL."
+                    } else if (verifiedCats.isEmpty()) {
+                        // Create a fallback category so channels aren't hidden
+                        val fallbackCat = IptvCategory(id = "xtream_default", name = "Default Category", type = "live")
+                        verifiedCats = listOf(fallbackCat)
+                        channels = channels.map { it.copy(categoryId = "xtream_default") }
+                    }
+
+                    _iptvCategories.value = verifiedCats
                     _iptvChannels.value = channels
                     
                     val currentCategory = _selectedCategory.value
-                    if (currentCategory == null || !cats.any { it.id == currentCategory.id }) {
-                        _selectedCategory.value = cats.firstOrNull()
+                    if (currentCategory == null || !verifiedCats.any { it.id == currentCategory.id }) {
+                        _selectedCategory.value = verifiedCats.firstOrNull()
                     }
 
                     // Auto-resume channel if returning/loading
@@ -1059,17 +1111,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 } else if (activeM3u != null) {
-                    IptvClient.fetchUrlStream(activeM3u.playlistUrl).use { stream ->
+                    val urlToFetch = activeM3u.playlistUrl.trim()
+                    if (!urlToFetch.startsWith("http://", ignoreCase = true) && 
+                        !urlToFetch.startsWith("https://", ignoreCase = true)) {
+                        throw Exception("Unsupported URI scheme. URLs must start with http:// or https://")
+                    }
+
+                    IptvClient.fetchUrlStream(urlToFetch).use { stream ->
                         val (cats, rawChannels) = IptvParser.parseM3u(stream)
                         val favorites = _favoriteChannelIds.value
-                        val channels = rawChannels.map { it.copy(isFavorite = favorites.contains(it.id)) }
+                        var channels = rawChannels.map { it.copy(isFavorite = favorites.contains(it.id)) }
+                        var verifiedCats = cats
 
-                        _iptvCategories.value = cats
+                        if (channels.isEmpty()) {
+                            _iptvErrorMessage.value = "No valid stream channels found in this playlist. Ensure lines have proper stream links."
+                        } else if (verifiedCats.isEmpty()) {
+                            // Create a fallback category
+                            val fallbackCat = IptvCategory(id = "m3u_default", name = "All Channels", type = "live")
+                            verifiedCats = listOf(fallbackCat)
+                            channels = channels.map { it.copy(categoryId = "m3u_default") }
+                        }
+
+                        _iptvCategories.value = verifiedCats
                         _iptvChannels.value = channels
                         
                         val currentCategory = _selectedCategory.value
-                        if (currentCategory == null || !cats.any { it.id == currentCategory.id }) {
-                            _selectedCategory.value = cats.firstOrNull()
+                        if (currentCategory == null || !verifiedCats.any { it.id == currentCategory.id }) {
+                            _selectedCategory.value = verifiedCats.firstOrNull()
                         }
 
                         // Auto-resume channel if returning/loading
@@ -1085,7 +1153,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                         // Load XMLTV EPG
                         val xmltvUrl = activeM3u.epgUrl
-                        if (!xmltvUrl.isNullOrBlank()) {
+                        if (!xmltvUrl.isNullOrBlank() && 
+                            (xmltvUrl.startsWith("http://", ignoreCase = true) || xmltvUrl.startsWith("https://", ignoreCase = true))) {
                             try {
                                 IptvClient.fetchUrlStream(xmltvUrl).use { xmlStream ->
                                     val eps = IptvParser.parseXmltv(xmlStream)
@@ -1100,7 +1169,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "IPTV channel initialization stream error", e)
-                _iptvErrorMessage.value = "Stream source error: ${e.localizedMessage}"
+                _iptvErrorMessage.value = "Import Failed: Unable to read playlist content (${e.localizedMessage})."
             } finally {
                 _isIptvLoading.value = false
             }

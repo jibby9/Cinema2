@@ -19,92 +19,137 @@ object IptvParser {
     fun parseM3u(inputStream: InputStream): Pair<List<IptvCategory>, List<IptvChannel>> {
         val channels = mutableListOf<IptvChannel>()
         val categoriesSet = mutableSetOf<String>()
+        val maxChannelsLimit = 10000
 
         try {
-            inputStream.bufferedReader().useLines { lines ->
+            // Setup robust UTF-8 decoder that replaces unrecognized/malformed characters
+            val decoder = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPLACE)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPLACE)
+            
+            java.io.BufferedReader(java.io.InputStreamReader(inputStream, decoder)).use { reader ->
                 var currentChannelName = ""
                 var currentLogoUrl: String? = null
                 var currentCategory = "Uncategorized"
                 var currentEpgId: String? = null
                 var currentChannelId: String? = null
 
-                lines.forEach { line ->
+                var line: String? = reader.readLine()
+                var linesCount = 0
+
+                while (line != null) {
+                    linesCount++
                     val trimmed = line.trim()
-                    if (trimmed.startsWith("#EXTINF:")) {
-                        // Reset line details
-                        currentChannelName = ""
-                        currentLogoUrl = null
-                        currentCategory = "Uncategorized"
-                        currentEpgId = null
-                        currentChannelId = null
-
-                        // Parse attributes, e.g., #EXTINF:-1 tvg-id="CNN" tvg-name="CNN US" tvg-logo="url" group-title="News",CNN US
-                        val infoPart = trimmed.substringAfter("#EXTINF:")
-                        val commaIdx = infoPart.lastIndexOf(',')
-                        currentChannelName = if (commaIdx != -1) {
-                            infoPart.substring(commaIdx + 1).trim()
-                        } else {
-                            "Unknown Channel"
-                        }
-
-                        // Regex to parse key-value attributes like tvg-id="foo" or group-title="bar"
-                        val metaPart = if (commaIdx != -1) infoPart.substring(0, commaIdx) else infoPart
-
-                        // Extract specific elements with helper
-                        currentEpgId = extractAttribute(metaPart, "tvg-id")
-                        val tvgName = extractAttribute(metaPart, "tvg-name")
-                        currentLogoUrl = extractAttribute(metaPart, "tvg-logo") ?: extractAttribute(metaPart, "tvg-screenshot")
-                        
-                        val categoryMatch = extractAttribute(metaPart, "group-title")
-                        if (categoryMatch != null && categoryMatch.isNotBlank()) {
-                            currentCategory = categoryMatch
-                        }
-                        
-                        if (currentEpgId.isNullOrBlank()) {
-                            currentEpgId = tvgName ?: currentChannelName
-                        }
-                        
-                        // Fallback channel unique ID
-                        currentChannelId = extractAttribute(metaPart, "channel-id") ?: currentEpgId
-                    } else if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("rtmp://")) {
-                        val streamUrl = trimmed
-                        val finalId = currentChannelId ?: java.util.UUID.nameUUIDFromBytes(streamUrl.toByteArray()).toString()
-                        
-                        categoriesSet.add(currentCategory)
-                        channels.add(
-                            IptvChannel(
-                                id = finalId,
-                                name = if (currentChannelName.isNotBlank()) currentChannelName else "Channel ${channels.size + 1}",
-                                logoUrl = currentLogoUrl,
-                                streamUrl = streamUrl,
-                                categoryId = currentCategory,
-                                epgId = currentEpgId,
-                                isFavorite = false
-                            )
-                        )
+                    if (trimmed.isEmpty()) {
+                        line = reader.readLine()
+                        continue
                     }
+
+                    if (trimmed.startsWith("#EXTM3U", ignoreCase = true)) {
+                        // EXTM3U start line, can contain key-value pairs but we skip by default
+                        line = reader.readLine()
+                        continue
+                    }
+
+                    if (trimmed.startsWith("#EXTINF:", ignoreCase = true)) {
+                        try {
+                            // Reset line details
+                            currentChannelName = ""
+                            currentLogoUrl = null
+                            currentCategory = "Uncategorized"
+                            currentEpgId = null
+                            currentChannelId = null
+
+                            // Parse attributes, e.g., #EXTINF:-1 tvg-id="CNN" tvg-name="CNN US" tvg-logo="url" group-title="News",CNN US
+                            val infoPart = trimmed.substringAfter("#EXTINF:")
+                            val commaIdx = infoPart.lastIndexOf(',')
+                            currentChannelName = if (commaIdx != -1) {
+                                infoPart.substring(commaIdx + 1).trim()
+                            } else {
+                                "Unknown Channel"
+                            }
+
+                            // Regex to parse key-value attributes like tvg-id="foo" or group-title="bar"
+                            val metaPart = if (commaIdx != -1) infoPart.substring(0, commaIdx) else infoPart
+
+                            // Extract specific elements with helper
+                            currentEpgId = extractAttribute(metaPart, "tvg-id")
+                            val tvgName = extractAttribute(metaPart, "tvg-name")
+                            currentLogoUrl = extractAttribute(metaPart, "tvg-logo") ?: extractAttribute(metaPart, "tvg-screenshot")
+                            
+                            val categoryMatch = extractAttribute(metaPart, "group-title")
+                            if (categoryMatch != null && categoryMatch.isNotBlank()) {
+                                currentCategory = categoryMatch
+                            }
+                            
+                            if (currentEpgId.isNullOrBlank()) {
+                                currentEpgId = tvgName ?: currentChannelName
+                            }
+                            
+                            // Fallback channel unique ID
+                            currentChannelId = extractAttribute(metaPart, "channel-id") ?: currentEpgId
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error parsing EXTINF info on line $linesCount: '$trimmed'", e)
+                        }
+                    } else if (!trimmed.startsWith("#")) {
+                        // Any line that does not start with '#' inside M3U represents the stream URL
+                        try {
+                            val streamUrl = trimmed
+                            if (streamUrl.isNotBlank()) {
+                                if (channels.size >= maxChannelsLimit) {
+                                    Log.w(TAG, "Playlist is too large! Truncated import at $maxChannelsLimit channels for app stability.")
+                                    break
+                                }
+
+                                val finalId = currentChannelId ?: java.util.UUID.nameUUIDFromBytes(streamUrl.toByteArray()).toString()
+                                val verifiedName = if (currentChannelName.isNotBlank()) currentChannelName else "Channel ${channels.size + 1}"
+                                
+                                categoriesSet.add(currentCategory)
+                                channels.add(
+                                    IptvChannel(
+                                        id = finalId,
+                                        name = verifiedName,
+                                        logoUrl = currentLogoUrl?.takeIf { it.isNotBlank() },
+                                        streamUrl = streamUrl,
+                                        categoryId = currentCategory,
+                                        epgId = currentEpgId?.takeIf { it.isNotBlank() },
+                                        isFavorite = false
+                                    )
+                                )
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Exception parsing stream URL line $linesCount: '$trimmed'", e)
+                        }
+                    }
+                    line = reader.readLine()
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error parsing M3U list", e)
+            Log.e(TAG, "Fatal error parsing M3U playlist stream source", e)
         }
 
         val categories = categoriesSet.map { name ->
             IptvCategory(id = name, name = name, type = "live")
         }.sortedBy { it.name }
 
+        Log.d(TAG, "M3U Parsing fully completed successfully. Loaded ${channels.size} live channels in ${categories.size} categories.")
         return Pair(categories, channels)
     }
 
     private fun extractAttribute(source: String, attrName: String): String? {
-        val pattern = """$attrName\s*=\s*"([^"]*)"""".toRegex(RegexOption.IGNORE_CASE)
-        val match = pattern.find(source)
-        if (match != null) {
-            return match.groupValues[1].trim()
+        return try {
+            val pattern = """$attrName\s*=\s*"([^"]*)"""".toRegex(RegexOption.IGNORE_CASE)
+            val match = pattern.find(source)
+            if (match != null) {
+                return match.groupValues[1].trim()
+            }
+            val patternNoQuotes = """$attrName\s*=\s*([^,\s]*)""".toRegex(RegexOption.IGNORE_CASE)
+            val matchNoQuotes = patternNoQuotes.find(source)
+            matchNoQuotes?.groupValues[1]?.trim()
+        } catch (e: Exception) {
+            Log.w(TAG, "Exception extracting attribute $attrName", e)
+            null
         }
-        val patternNoQuotes = """$attrName\s*=\s*([^,\s]*)""".toRegex(RegexOption.IGNORE_CASE)
-        val matchNoQuotes = patternNoQuotes.find(source)
-        return matchNoQuotes?.groupValues[1]?.trim()
     }
 
     /**
