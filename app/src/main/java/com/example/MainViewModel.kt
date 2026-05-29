@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.Color
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -234,6 +235,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val TAG = "MainViewModel"
 
     init {
+        // Load custom themes from storage at VM start
+        try {
+            val loadedCustomThemes = CustomThemePersistence.loadThemes(application)
+            ThemePresets.setCustomThemes(loadedCustomThemes)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed loading custom themes in init block", e)
+        }
+
         // Collect active theme selection and reactive layout configurations
         viewModelScope.launch {
             preferenceManager.selectedThemeId.collect { id ->
@@ -418,6 +427,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _activeThemeId.value = themeId
             _activeThemePreset.value = ThemePresets.getById(themeId)
             preferenceManager.saveSelectedTheme(themeId)
+        }
+    }
+
+    fun createAndSaveCustomTheme(
+        name: String,
+        primaryColorHex: Long,
+        secondaryColorHex: Long,
+        isAnimated: Boolean,
+        backdropImageUri: String?
+    ) {
+        viewModelScope.launch {
+            val id = "custom_" + System.currentTimeMillis()
+            val newPreset = ThemePreset(
+                id = id,
+                name = name,
+                description = "User custom designed theme '$name'.",
+                defaultLeft = ThemePresets.Custom.defaultLeft,
+                defaultTop = ThemePresets.Custom.defaultTop,
+                defaultWidth = ThemePresets.Custom.defaultWidth,
+                defaultHeight = ThemePresets.Custom.defaultHeight,
+                defaultDimAlpha = ThemePresets.Custom.defaultDimAlpha,
+                defaultSubtitleOffset = ThemePresets.Custom.defaultSubtitleOffset,
+                primaryColor = Color(primaryColorHex),
+                secondaryColor = Color(secondaryColorHex),
+                cornerRadiusDp = 12,
+                frameThicknessDp = 5,
+                frameColor = Color(0xFF1E1B20),
+                glowColor = Color(primaryColorHex).copy(alpha = 0.25f),
+                glowRadiusDp = 12,
+                shadowIntensity = 0.45f,
+                vignetteStrength = 0.6f,
+                ambientColorTint = Color(primaryColorHex).copy(alpha = 0.08f),
+                isAnimated = isAnimated,
+                animationType = if (isAnimated) "aurora" else null,
+                backdropImageUri = backdropImageUri
+            )
+
+            val currentCustoms = CustomThemePersistence.loadThemes(getApplication()).toMutableList()
+            currentCustoms.add(newPreset)
+            CustomThemePersistence.saveThemes(getApplication(), currentCustoms)
+            ThemePresets.setCustomThemes(currentCustoms)
+            
+            // Auto select the newly created theme!
+            selectTheme(id)
+        }
+    }
+
+    fun deleteCustomTheme(id: String) {
+        viewModelScope.launch {
+            val currentCustoms = CustomThemePersistence.loadThemes(getApplication()).filter { it.id != id }
+            CustomThemePersistence.saveThemes(getApplication(), currentCustoms)
+            ThemePresets.setCustomThemes(currentCustoms)
+            if (_activeThemeId.value == id) {
+                selectTheme("cinema")
+            }
         }
     }
 

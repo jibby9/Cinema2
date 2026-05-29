@@ -22,7 +22,8 @@ fun ThemeBackdrop(
     isAnimationEnabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    val themeId = themePreset.id
+    val rawId = themePreset.id
+    val themeId = if (rawId.lowercase().startsWith("custom")) "custom" else rawId
     val isAnim = isAnimationEnabled && !isEditMode
     
     val infiniteTransition = rememberInfiniteTransition(label = "ambient_effects")
@@ -517,9 +518,10 @@ fun ThemeBackdrop(
             }
 
             "custom" -> {
-                if (!customBackgroundUri.isNullOrBlank()) {
+                val imageUriToUse = themePreset.backdropImageUri ?: customBackgroundUri
+                if (!imageUriToUse.isNullOrBlank()) {
                     coil.compose.AsyncImage(
-                        model = customBackgroundUri,
+                        model = imageUriToUse,
                         contentDescription = "Custom theme backdrop background",
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
@@ -534,7 +536,7 @@ fun ThemeBackdrop(
                         drawRect(
                             brush = Brush.radialGradient(
                                 colors = listOf(
-                                    Color(0xFFEC4899).copy(alpha = 0.18f),
+                                    themePreset.primaryColor.copy(alpha = 0.18f),
                                     Color(0xFF030204)
                                 ),
                                 center = Offset(width / 2f, height / 2f),

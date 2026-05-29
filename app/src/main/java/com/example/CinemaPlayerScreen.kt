@@ -2303,6 +2303,17 @@ fun InteractiveConsolePanel(
     val customBackgroundUri by viewModel.customBgUri.collectAsState()
     val activeThemeId by viewModel.activeThemeId.collectAsState()
 
+    var showThemeDesignerDialog by remember { mutableStateOf(false) }
+    var designerBackdropUri by remember { mutableStateOf<String?>(null) }
+    val designerPhotoLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+        onResult = { uri ->
+            if (uri != null) {
+                designerBackdropUri = uri.toString()
+            }
+        }
+    )
+
     val photoPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
         onResult = { uri ->
@@ -2389,61 +2400,127 @@ fun InteractiveConsolePanel(
                     ) {
                         // Section: Theme Presets
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = "AMBIENT VIEWING PRESETS",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.2.sp,
-                                    color = Color.White.copy(alpha = 0.5f)
-                                )
-                            )
-
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                ThemePresets.all.forEach { preset ->
-                                    val isSelected = activeThemeId == preset.id
-                                    Card(
-                                        onClick = { viewModel.selectTheme(preset.id) },
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(58.dp)
-                                            .border(
-                                                width = if (isSelected) 2.dp else 1.dp,
-                                                color = if (isSelected) preset.primaryColor else Color.White.copy(alpha = 0.08f),
-                                                shape = RoundedCornerShape(10.dp)
-                                            ),
-                                        colors = CardDefaults.cardColors(
-                                            containerColor = if (isSelected) preset.secondaryColor.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.02f)
-                                        ),
-                                        shape = RoundedCornerShape(10.dp)
+                                Text(
+                                    text = "AMBIENT VIEWING PRESETS",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.2.sp,
+                                        color = Color.White.copy(alpha = 0.5f)
+                                    )
+                                )
+                                Button(
+                                    onClick = { showThemeDesignerDialog = true },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color.White.copy(alpha = 0.08f),
+                                        contentColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                                    modifier = Modifier.height(28.dp).testTag("trigger_theme_designer")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("New Theme", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            val themes = ThemePresets.all
+                            val chunkedThemes = themes.chunked(2)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                chunkedThemes.forEach { rowThemes ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .padding(6.dp),
-                                            verticalArrangement = Arrangement.Center,
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            Icon(
-                                                imageVector = when (preset.id) {
-                                                    "cosy_cabin" -> Icons.Default.Weekend
-                                                    "sports_arena" -> Icons.Default.EmojiEvents
-                                                    "custom" -> Icons.Default.Image
-                                                    else -> Icons.Default.Movie
-                                                },
-                                                contentDescription = null,
-                                                tint = if (isSelected) preset.primaryColor else Color.LightGray.copy(alpha = 0.5f),
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                            Spacer(modifier = Modifier.height(2.dp))
-                                            Text(
-                                                text = preset.name,
-                                                color = if (isSelected) Color.White else Color.LightGray,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
+                                        rowThemes.forEach { preset ->
+                                            val isSelected = activeThemeId == preset.id
+                                            val isUserTheme = preset.id.startsWith("custom_")
+                                            Card(
+                                                onClick = { viewModel.selectTheme(preset.id) },
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(60.dp)
+                                                    .border(
+                                                        width = if (isSelected) 2.dp else 1.dp,
+                                                        color = if (isSelected) preset.primaryColor else Color.White.copy(alpha = 0.08f),
+                                                        shape = RoundedCornerShape(10.dp)
+                                                    )
+                                                    .testTag("theme_card_${preset.id}"),
+                                                colors = CardDefaults.cardColors(
+                                                    containerColor = if (isSelected) preset.secondaryColor.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.02f)
+                                                ),
+                                                shape = RoundedCornerShape(10.dp)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                        modifier = Modifier.weight(1f)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = when (preset.id) {
+                                                                "cosy_cabin" -> Icons.Default.Weekend
+                                                                "sports_arena" -> Icons.Default.EmojiEvents
+                                                                "custom" -> Icons.Default.Image
+                                                                "aurora" -> Icons.Default.Brush
+                                                                "matrix" -> Icons.Default.Palette
+                                                                "stardust" -> Icons.Default.AutoAwesome
+                                                                else -> if (isUserTheme) Icons.Default.Palette else Icons.Default.Movie
+                                                            },
+                                                            contentDescription = null,
+                                                            tint = if (isSelected) preset.primaryColor else Color.LightGray.copy(alpha = 0.5f),
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
+                                                        Column {
+                                                            Text(
+                                                                text = if (preset.isAnimated) "✨ ${preset.name}" else preset.name,
+                                                                color = if (isSelected) Color.White else Color.LightGray,
+                                                                fontSize = 11.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                maxLines = 1
+                                                            )
+                                                            Text(
+                                                                text = if (isUserTheme) "My Custom Theme" else "Preset Theme",
+                                                                color = Color.White.copy(alpha = 0.4f),
+                                                                fontSize = 8.5.sp
+                                                            )
+                                                        }
+                                                    }
+                                                    if (isUserTheme) {
+                                                        IconButton(
+                                                            onClick = { viewModel.deleteCustomTheme(preset.id) },
+                                                            modifier = Modifier.size(26.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Delete,
+                                                                contentDescription = "Delete Custom Theme",
+                                                                tint = Color.LightGray.copy(alpha = 0.6f),
+                                                                modifier = Modifier.size(16.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if (rowThemes.size < 2) {
+                                            Spacer(modifier = Modifier.weight(1f))
                                         }
                                     }
                                 }
@@ -2457,7 +2534,7 @@ fun InteractiveConsolePanel(
                                 modifier = Modifier.padding(top = 4.dp, start = 2.dp)
                             )
 
-                            if (activeThemeId == "custom") {
+                            if (activeThemeId.lowercase().startsWith("custom")) {
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Row(
                                     modifier = Modifier
@@ -3155,6 +3232,313 @@ fun InteractiveConsolePanel(
                                 text = "MIME: http, https, content, file",
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = TextMuted)
                             )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showThemeDesignerDialog) {
+        var designerThemeName by remember { mutableStateOf("") }
+        var designerPrimaryColor by remember { mutableStateOf(0xFF6366F1) } // Indigo Default
+        var designerSecondaryColor by remember { mutableStateOf(0xFF1E1B4B) } // Dark Indigo Default
+        var designerIsAnimated by remember { mutableStateOf(false) }
+
+        val colorOptions = listOf(
+            Pair("Indigo", Pair(0xFF6366F1, 0xFF1E1B4B)),
+            Pair("Ruby Crimson", Pair(0xFFEF4444, 0xFF450A0A)),
+            Pair("Neon Pink", Pair(0xFFEC4899, 0xFF4D0519)),
+            Pair("Solar Amber", Pair(0xFFF59E0B, 0xFF451A03)),
+            Pair("Teal Forest", Pair(0xFF10B981, 0xFF064E3B)),
+            Pair("Cyan Wave", Pair(0xFF06B6D4, 0xFF083344)),
+            Pair("Velvet Purple", Pair(0xFF8B5CF6, 0xFF2E1065))
+        )
+
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showThemeDesignerDialog = false }
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF131015)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.10f))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Theme Designer",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        IconButton(onClick = { showThemeDesignerDialog = false }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Close Designer", tint = Color.LightGray, modifier = Modifier.size(16.dp))
+                        }
+                    }
+
+                    // Name field
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "THEME TITLE",
+                            color = Color.White.copy(alpha = 0.5f),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp
+                        )
+                        OutlinedTextField(
+                            value = designerThemeName,
+                            onValueChange = { designerThemeName = it },
+                            placeholder = { Text("e.g. My Cosmic Vibe", color = Color.White.copy(alpha = 0.3f), fontSize = 12.sp) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(designerPrimaryColor),
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+                                cursorColor = Color(designerPrimaryColor)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .testTag("designer_theme_name_input"),
+                            textStyle = LocalTextStyle.current.copy(color = Color.White, fontSize = 12.sp)
+                        )
+                    }
+
+                    // Color chips
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "CHOOSE AMBIENT COLOR PALETTE",
+                            color = Color.White.copy(alpha = 0.5f),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            colorOptions.take(4).forEach { opt ->
+                                val isColorSelected = designerPrimaryColor == opt.second.first
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(34.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(opt.second.first).copy(alpha = 0.15f))
+                                        .border(
+                                            width = if (isColorSelected) 2.dp else 1.dp,
+                                            color = if (isColorSelected) Color(opt.second.first) else Color.White.copy(alpha = 0.05f),
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable {
+                                            designerPrimaryColor = opt.second.first
+                                            designerSecondaryColor = opt.second.second
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(12.dp)
+                                            .clip(androidx.compose.foundation.shape.CircleShape)
+                                            .background(Color(opt.second.first))
+                                    )
+                                    if (isColorSelected) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(10.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            colorOptions.drop(4).forEach { opt ->
+                                val isColorSelected = designerPrimaryColor == opt.second.first
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(34.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(opt.second.first).copy(alpha = 0.15f))
+                                        .border(
+                                            width = if (isColorSelected) 2.dp else 1.dp,
+                                            color = if (isColorSelected) Color(opt.second.first) else Color.White.copy(alpha = 0.05f),
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable {
+                                            designerPrimaryColor = opt.second.first
+                                            designerSecondaryColor = opt.second.second
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(12.dp)
+                                            .clip(androidx.compose.foundation.shape.CircleShape)
+                                            .background(Color(opt.second.first))
+                                    )
+                                    if (isColorSelected) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(10.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+
+                    // Background Photo Picker inside designer
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "WALL PHOTO BACKGROUND (OPTIONAL)",
+                            color = Color.White.copy(alpha = 0.5f),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.02f))
+                                .padding(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color.Black.copy(alpha = 0.3f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (designerBackdropUri != null) {
+                                    coil.compose.AsyncImage(
+                                        model = designerBackdropUri,
+                                        contentDescription = "Custom preview",
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Icon(Icons.Default.Image, contentDescription = null, tint = Color.White.copy(alpha = 0.20f), modifier = Modifier.size(14.dp))
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Image Background",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    if (designerBackdropUri != null) "Custom photo specified" else "Project ambient wall texture",
+                                    color = TextMuted,
+                                    fontSize = 8.5.sp
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    designerPhotoLauncher.launch(
+                                        androidx.activity.result.PickVisualMediaRequest(
+                                            androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly
+                                        )
+                                    )
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(designerPrimaryColor),
+                                    contentColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(6.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                modifier = Modifier.height(24.dp)
+                            ) {
+                                Text("Pick File", fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    // Animated effect
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.White.copy(alpha = 0.02f))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Responsive Light Animation", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Add shifting neon light ribbons to backdrop", color = TextMuted, fontSize = 8.5.sp)
+                        }
+                        Switch(
+                            checked = designerIsAnimated,
+                            onCheckedChange = { designerIsAnimated = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color(designerPrimaryColor),
+                                checkedTrackColor = Color(designerPrimaryColor).copy(alpha = 0.3f)
+                            )
+                        )
+                    }
+
+                    // Bottom Buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { showThemeDesignerDialog = false },
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Cancel", color = Color.White, fontSize = 11.sp)
+                        }
+                        Button(
+                            onClick = {
+                                if (designerThemeName.isNotBlank()) {
+                                    viewModel.createAndSaveCustomTheme(
+                                        name = designerThemeName,
+                                        primaryColorHex = designerPrimaryColor.toLong(),
+                                        secondaryColorHex = designerSecondaryColor.toLong(),
+                                        isAnimated = designerIsAnimated,
+                                        backdropImageUri = designerBackdropUri
+                                    )
+                                    showThemeDesignerDialog = false
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(designerPrimaryColor),
+                                contentColor = Color.White,
+                                disabledContainerColor = Color.White.copy(alpha = 0.05f),
+                                disabledContentColor = Color.White.copy(alpha = 0.20f)
+                            ),
+                            enabled = designerThemeName.isNotBlank(),
+                            modifier = Modifier.weight(1f).testTag("save_custom_theme_btn")
+                        ) {
+                            Text("Save Theme", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

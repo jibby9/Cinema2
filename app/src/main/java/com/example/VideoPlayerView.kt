@@ -29,6 +29,41 @@ import androidx.media3.ui.PlayerView
 import androidx.media3.ui.AspectRatioFrameLayout
 
 @OptIn(UnstableApi::class)
+object SharedPlayerSessionManager {
+    private var cachedExoPlayer: ExoPlayer? = null
+    var lastUrl: String? = null
+    var lastHeaders: Map<String, String>? = null
+
+    @Synchronized
+    fun getOrCreatePlayer(context: android.content.Context): ExoPlayer {
+        var player = cachedExoPlayer
+        if (player == null) {
+            val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                .setUserAgent("CinemaPlayer/1.1 (Android; Media3; ExoPlayer)")
+                .setAllowCrossProtocolRedirects(true)
+            val defaultDataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
+            val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(defaultDataSourceFactory)
+
+            player = ExoPlayer.Builder(context)
+                .setMediaSourceFactory(mediaSourceFactory)
+                .build().apply {
+                    playWhenReady = true
+                }
+            cachedExoPlayer = player
+        }
+        return player
+    }
+
+    @Synchronized
+    fun release() {
+        cachedExoPlayer?.release()
+        cachedExoPlayer = null
+        lastUrl = null
+        lastHeaders = null
+    }
+}
+
+@OptIn(UnstableApi::class)
 @Composable
 fun VideoPlayerView(
     videoUrl: String,
@@ -43,24 +78,8 @@ fun VideoPlayerView(
     val context = LocalContext.current
     var isLoading by remember { mutableStateOf(true) }
 
-    // Create the HttpDataSource Factory with redirect configurations and Custom User Agent
-    val httpDataSourceFactory = remember {
-        androidx.media3.datasource.DefaultHttpDataSource.Factory()
-            .setUserAgent("CinemaPlayer/1.1 (Android; Media3; ExoPlayer)")
-            .setAllowCrossProtocolRedirects(true)
-    }
-
-    // Remember the ExoPlayer instance, injecting the custom httpDataSourceFactory wrapped in a DefaultDataSource.Factory
-    val exoPlayer = remember {
-        val defaultDataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
-        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(defaultDataSourceFactory)
-
-        ExoPlayer.Builder(context)
-            .setMediaSourceFactory(mediaSourceFactory)
-            .build().apply {
-                playWhenReady = true
-            }
-    }
+    // Retrieve or lazy-initialize the singleton shared ExoPlayer session
+    val exoPlayer = remember { SharedPlayerSessionManager.getOrCreatePlayer(context) }
 
     // Connect lifecycle and release the player when the Composable leaves the composition
     DisposableEffect(exoPlayer) {
@@ -116,30 +135,38 @@ fun VideoPlayerView(
 
         onDispose {
             exoPlayer.removeListener(listener)
-            exoPlayer.release()
+            // Detach player initialized state, but DO NOT release ExoPlayer!
+            // This is critical to maintain persistent active playback while opening/closing TV guide!
             onPlayerInitialized(null)
         }
     }
 
-    // Reactively update the play source and apply request headers when the videoUrl or headers change
+    // Reactively update the play source and apply request headers ONLY when the videoUrl or headers change to something new!
     LaunchedEffect(videoUrl, headers) {
-        isLoading = true
-        try {
-            // Setup dynamic combination of default + custom optional request headers
-            val combinedHeaders = mutableMapOf(
-                "Accept" to "*/*",
-                "Accept-Language" to "en-US,en;q=0.5"
-            )
-            combinedHeaders.putAll(headers)
-            httpDataSourceFactory.setDefaultRequestProperties(combinedHeaders)
+        if (videoUrl.isNotBlank()) {
+            val isSameSource = SharedPlayerSessionManager.lastUrl == videoUrl && 
+                               SharedPlayerSessionManager.lastHeaders == headers
 
-            val mediaItem = MediaItem.fromUri(videoUrl)
-            exoPlayer.setMediaItem(mediaItem)
-            exoPlayer.prepare()
-            exoPlayer.play()
-        } catch (e: Exception) {
-            isLoading = false
-            onPlaybackError(e.localizedMessage ?: "Preparation failed")
+            if (!isSameSource) {
+                isLoading = true
+                try {
+                    val mediaItem = MediaItem.fromUri(videoUrl)
+                    exoPlayer.stop()
+                    exoPlayer.clearMediaItems()
+                    exoPlayer.setMediaItem(mediaItem)
+                    exoPlayer.prepare()
+                    exoPlayer.play()
+
+                    SharedPlayerSessionManager.lastUrl = videoUrl
+                    SharedPlayerSessionManager.lastHeaders = headers
+                } catch (e: Exception) {
+                    isLoading = false
+                    onPlaybackError(e.localizedMessage ?: "Preparation failed")
+                }
+            } else {
+                // Same source, update loading state matching current playback state
+                isLoading = exoPlayer.playbackState == Player.STATE_BUFFERING
+            }
         }
     }
 

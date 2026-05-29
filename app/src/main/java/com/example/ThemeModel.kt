@@ -29,7 +29,8 @@ data class ThemePreset(
     val backdropImageResId: Int? = null,
     val foregroundImageResId: Int? = null,
     val isAnimated: Boolean = false,
-    val animationType: String? = null
+    val animationType: String? = null,
+    val backdropImageUri: String? = null
 )
 
 /**
@@ -210,9 +211,105 @@ object ThemePresets {
         animationType = "stardust"
     )
 
-    val all = listOf(Cinema, CosyCabin, SportsArena, Custom, Aurora, Matrix, Stardust)
+    val allDefaults = listOf(Cinema, CosyCabin, SportsArena, Custom, Aurora, Matrix, Stardust)
+
+    private val customThemesList = java.util.Collections.synchronizedList(mutableListOf<ThemePreset>())
+
+    fun setCustomThemes(themes: List<ThemePreset>) {
+        synchronized(customThemesList) {
+            customThemesList.clear()
+            customThemesList.addAll(themes)
+        }
+    }
+
+    val all: List<ThemePreset>
+        get() = allDefaults + synchronized(customThemesList) { customThemesList.toList() }
 
     fun getById(id: String): ThemePreset {
         return all.find { it.id.lowercase() == id.lowercase() } ?: Cinema
+    }
+}
+
+object CustomThemePersistence {
+    private const val FILENAME = "custom_themes_db_v2.json"
+
+    fun loadThemes(context: android.content.Context): List<ThemePreset> {
+        val file = java.io.File(context.filesDir, FILENAME)
+        if (!file.exists()) return emptyList()
+        val list = mutableListOf<ThemePreset>()
+        try {
+            val jsonStr = file.readText()
+            val array = org.json.JSONArray(jsonStr)
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    ThemePreset(
+                        id = obj.getString("id"),
+                        name = obj.getString("name"),
+                        description = obj.optString("description", "User custom designed theme."),
+                        defaultLeft = obj.optDouble("defaultLeft", 0.10).toFloat(),
+                        defaultTop = obj.optDouble("defaultTop", 0.15).toFloat(),
+                        defaultWidth = obj.optDouble("defaultWidth", 0.80).toFloat(),
+                        defaultHeight = obj.optDouble("defaultHeight", 0.45).toFloat(),
+                        defaultDimAlpha = obj.optDouble("defaultDimAlpha", 0.70).toFloat(),
+                        defaultSubtitleOffset = obj.optDouble("defaultSubtitleOffset", 0.05).toFloat(),
+                        primaryColor = Color(obj.getLong("primaryColor")),
+                        secondaryColor = Color(obj.getLong("secondaryColor")),
+                        cornerRadiusDp = obj.optInt("cornerRadiusDp", 8),
+                        frameThicknessDp = obj.optInt("frameThicknessDp", 4),
+                        frameColor = Color(obj.optLong("frameColor", 0xFF0F172AL)),
+                        glowColor = Color(obj.optLong("glowColor", 0x406366F1L)),
+                        glowRadiusDp = obj.optInt("glowRadiusDp", 16),
+                        shadowIntensity = obj.optDouble("shadowIntensity", 0.5).toFloat(),
+                        vignetteStrength = obj.optDouble("vignetteStrength", 0.4).toFloat(),
+                        ambientColorTint = Color(obj.optLong("ambientColorTint", 0L)),
+                        isAnimated = obj.optBoolean("isAnimated", false),
+                        animationType = obj.optString("animationType", null),
+                        backdropImageUri = obj.optString("backdropImageUri", null)
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("CustomThemePersistence", "Error loading custom themes", e)
+        }
+        return list
+    }
+
+    fun saveThemes(context: android.content.Context, themes: List<ThemePreset>) {
+        val file = java.io.File(context.filesDir, FILENAME)
+        try {
+            val array = org.json.JSONArray()
+            for (t in themes) {
+                val obj = org.json.JSONObject()
+                obj.put("id", t.id)
+                obj.put("name", t.name)
+                obj.put("description", t.description)
+                obj.put("defaultLeft", t.defaultLeft.toDouble())
+                obj.put("defaultTop", t.defaultTop.toDouble())
+                obj.put("defaultWidth", t.defaultWidth.toDouble())
+                obj.put("defaultHeight", t.defaultHeight.toDouble())
+                obj.put("defaultDimAlpha", t.defaultDimAlpha.toDouble())
+                obj.put("defaultSubtitleOffset", t.defaultSubtitleOffset.toDouble())
+                obj.put("primaryColor", t.primaryColor.value.toLong())
+                obj.put("secondaryColor", t.secondaryColor.value.toLong())
+                obj.put("cornerRadiusDp", t.cornerRadiusDp)
+                obj.put("frameThicknessDp", t.frameThicknessDp)
+                obj.put("frameColor", t.frameColor.value.toLong())
+                obj.put("glowColor", t.glowColor.value.toLong())
+                obj.put("glowRadiusDp", t.glowRadiusDp)
+                obj.put("shadowIntensity", t.shadowIntensity.toDouble())
+                obj.put("vignetteStrength", t.vignetteStrength.toDouble())
+                obj.put("ambientColorTint", t.ambientColorTint.value.toLong())
+                obj.put("isAnimated", t.isAnimated)
+                obj.put("animationType", t.animationType)
+                if (t.backdropImageUri != null) {
+                    obj.put("backdropImageUri", t.backdropImageUri)
+                }
+                array.put(obj)
+            }
+            file.writeText(array.toString())
+        } catch (e: Exception) {
+            android.util.Log.e("CustomThemePersistence", "Error saving custom themes", e)
+        }
     }
 }
