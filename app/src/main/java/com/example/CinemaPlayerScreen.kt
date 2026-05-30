@@ -429,36 +429,74 @@ fun CinemaPlayerScreen(
                             }
                         }
                     } else {
-                        // Bottom drawer panel overlay for standard device portrait
-                        val activeHeightFraction = if (isIptvModeActive) 0.65f else 0.48f
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(paddingValues)
-                        ) {
-                            androidx.compose.animation.AnimatedVisibility(
-                                visible = showDebugPanel,
-                                enter = slideInVertically(initialOffsetY = { it }) + androidx.compose.animation.fadeIn(),
-                                exit = slideOutVertically(targetOffsetY = { it }) + androidx.compose.animation.fadeOut(),
+                        // Standard device portrait (non-expanded compact screens)
+                        if (isIptvModeActive) {
+                            // Immersive IPTV Modal Side Panel for standard mobile phones
+                            Box(
                                 modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .fillMaxWidth()
-                                    .fillMaxHeight(activeHeightFraction)
-                                    .padding(16.dp)
+                                    .fillMaxSize()
                             ) {
-                                if (isIptvModeActive) {
+                                // 1. Deep cinematic scrim covering the entire backdrop area
+                                androidx.compose.animation.AnimatedVisibility(
+                                    visible = showDebugPanel,
+                                    enter = androidx.compose.animation.fadeIn(),
+                                    exit = androidx.compose.animation.fadeOut()
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(Color.Black.copy(alpha = 0.82f))
+                                            .clickable(
+                                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                                indication = null
+                                            ) {
+                                                viewModel.setDebugPanelVisible(false)
+                                            }
+                                    )
+                                }
+
+                                // 2. Premium full-height floating side-sheet panel
+                                androidx.compose.animation.AnimatedVisibility(
+                                    visible = showDebugPanel,
+                                    enter = androidx.compose.animation.slideInHorizontally(initialOffsetX = { it }) + androidx.compose.animation.fadeIn(),
+                                    exit = androidx.compose.animation.slideOutHorizontally(targetOffsetX = { it }) + androidx.compose.animation.fadeOut(),
+                                    modifier = Modifier
+                                        .align(Alignment.CenterEnd)
+                                        .fillMaxWidth(0.92f)
+                                        .fillMaxHeight()
+                                        .padding(top = 12.dp, bottom = 12.dp, end = 12.dp)
+                                ) {
                                     Card(
                                         modifier = Modifier.fillMaxSize(),
-                                        shape = RoundedCornerShape(24.dp),
+                                        shape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp),
                                         colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
-                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
                                     ) {
                                         IptvDashboard(
                                             viewModel = viewModel,
                                             modifier = Modifier.fillMaxSize()
                                         )
                                     }
-                                } else {
+                                }
+                            }
+                        } else {
+                            // Bottom drawer panel overlay for standard device portrait / video player controls
+                            val activeHeightFraction = 0.48f
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(paddingValues)
+                            ) {
+                                androidx.compose.animation.AnimatedVisibility(
+                                    visible = showDebugPanel,
+                                    enter = slideInVertically(initialOffsetY = { it }) + androidx.compose.animation.fadeIn(),
+                                    exit = slideOutVertically(targetOffsetY = { it }) + androidx.compose.animation.fadeOut(),
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                        .fillMaxHeight(activeHeightFraction)
+                                        .padding(16.dp)
+                                ) {
                                     InteractiveConsolePanel(
                                         viewModel = viewModel,
                                         activeThemePreset = activeThemePreset,
