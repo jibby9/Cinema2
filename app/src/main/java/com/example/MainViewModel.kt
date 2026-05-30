@@ -12,12 +12,38 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import androidx.compose.ui.graphics.Color
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val preferenceManager = PlayerPreferenceManager(application)
+
+    private val initialPreferences = runBlocking {
+        try {
+            // Eager-load custom themes before extracting active theme preset
+            val loadedCustomThemes = CustomThemePersistence.loadThemes(application)
+            ThemePresets.setCustomThemes(loadedCustomThemes)
+        } catch (e: Exception) {
+            Log.e("MainViewModel", "Failed to eager-load custom themes during setup", e)
+        }
+        
+        val themeId = try {
+            preferenceManager.selectedThemeId.first()
+        } catch (e: Exception) {
+            "cinema"
+        }
+
+        val lastCategory = try {
+            preferenceManager.lastPlayedTvCategory.first()
+        } catch (e: Exception) {
+            null
+        }
+
+        Pair(themeId, lastCategory)
+    }
 
     // ==========================================
     // PREMIUM FEATURES STATES
@@ -61,11 +87,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isSettingsLoaded: StateFlow<Boolean> = _isSettingsLoaded.asStateFlow()
 
     // Themes states
-    private val _activeThemeId = MutableStateFlow("cinema")
+    private val _activeThemeId = MutableStateFlow(initialPreferences.first)
     val activeThemeId: StateFlow<String> = _activeThemeId.asStateFlow()
 
-    private val _activeThemePreset = MutableStateFlow(ThemePresets.Cinema)
+    private val _activeThemePreset = MutableStateFlow(ThemePresets.getById(initialPreferences.first))
     val activeThemePreset: StateFlow<ThemePreset> = _activeThemePreset.asStateFlow()
+
+    private var lastPlayedCategorySession: String? = initialPreferences.second
+    private var isInitialCategoryRestored = false
 
     private val _customBgUri = MutableStateFlow<String?>(null)
     val customBgUri: StateFlow<String?> = _customBgUri.asStateFlow()
@@ -754,6 +783,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             preferenceManager.saveLastChannelId(channel.id)
+            if (channel.categoryId.isNotBlank()) {
+                preferenceManager.saveLastPlayedTvCategory(channel.categoryId)
+            }
         }
         // If Xtream account active, fetch its guide details asynchronously
         val activeXtream = _xtreamAccounts.value.find { it.isActive }
@@ -1272,7 +1304,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         
                         val currentCategory = _selectedCategory.value
                         if (currentCategory == null || !cats.any { it.id == currentCategory.id }) {
-                            _selectedCategory.value = cats.firstOrNull()
+                            val savedCatId = lastPlayedCategorySession
+                            val matchedCat = if (!isInitialCategoryRestored && savedCatId != null) {
+                                cats.find { it.id == savedCatId }
+                            } else null
+                            if (matchedCat != null) {
+                                _selectedCategory.value = matchedCat
+                                isInitialCategoryRestored = true
+                            } else {
+                                _selectedCategory.value = cats.firstOrNull()
+                                if (savedCatId != null) {
+                                    isInitialCategoryRestored = true
+                                }
+                            }
                         }
                         hasLoadedFromCache = true
                         
@@ -1325,7 +1369,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                         val currentCategory = _selectedCategory.value
                         if (currentCategory == null || !verifiedCats.any { it.id == currentCategory.id }) {
-                            _selectedCategory.value = verifiedCats.firstOrNull()
+                            val savedCatId = lastPlayedCategorySession
+                            val matchedCat = if (!isInitialCategoryRestored && savedCatId != null) {
+                                verifiedCats.find { it.id == savedCatId }
+                            } else null
+                            if (matchedCat != null) {
+                                _selectedCategory.value = matchedCat
+                                isInitialCategoryRestored = true
+                            } else {
+                                _selectedCategory.value = verifiedCats.firstOrNull()
+                                if (savedCatId != null) {
+                                    isInitialCategoryRestored = true
+                                }
+                            }
                         }
 
                         // Auto-resume channel if returning/loading
@@ -1371,7 +1427,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                             val currentCategory = _selectedCategory.value
                             if (currentCategory == null || !verifiedCats.any { it.id == currentCategory.id }) {
-                                _selectedCategory.value = verifiedCats.firstOrNull()
+                                val savedCatId = lastPlayedCategorySession
+                                val matchedCat = if (!isInitialCategoryRestored && savedCatId != null) {
+                                    verifiedCats.find { it.id == savedCatId }
+                                } else null
+                                if (matchedCat != null) {
+                                    _selectedCategory.value = matchedCat
+                                    isInitialCategoryRestored = true
+                                } else {
+                                    _selectedCategory.value = verifiedCats.firstOrNull()
+                                    if (savedCatId != null) {
+                                        isInitialCategoryRestored = true
+                                    }
+                                }
                             }
 
                             // Auto-resume channel if returning/loading

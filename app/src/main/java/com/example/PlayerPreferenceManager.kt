@@ -51,6 +51,7 @@ class PlayerPreferenceManager(private val context: Context) {
         val KEY_IPTV_M3U_PLAYLISTS_JSON = stringPreferencesKey("iptv_m3u_playlists_json")
         val KEY_IPTV_FAVORITES = stringSetPreferencesKey("iptv_favorites")
         val KEY_IPTV_LAST_CHANNEL_ID = stringPreferencesKey("iptv_last_channel_id")
+        val KEY_IPTV_LAST_PLAYED_CATEGORY = stringPreferencesKey("last_played_tv_category")
         
         // Custom Category order and hidden groups
         val KEY_IPTV_CATEGORY_ORDER = stringPreferencesKey("iptv_category_order")
@@ -300,6 +301,23 @@ class PlayerPreferenceManager(private val context: Context) {
                 preferences.remove(KEY_IPTV_LAST_CHANNEL_ID)
             } else {
                 preferences[KEY_IPTV_LAST_CHANNEL_ID] = channelId
+            }
+        }
+    }
+
+    /**
+     * IPTV: Last played live TV category ID
+     */
+    val lastPlayedTvCategory: Flow<String?> = context.dataStore.data.map { preferences ->
+        preferences[KEY_IPTV_LAST_PLAYED_CATEGORY]
+    }
+
+    suspend fun saveLastPlayedTvCategory(categoryId: String?) {
+        context.dataStore.edit { preferences ->
+            if (categoryId == null) {
+                preferences.remove(KEY_IPTV_LAST_PLAYED_CATEGORY)
+            } else {
+                preferences[KEY_IPTV_LAST_PLAYED_CATEGORY] = categoryId
             }
         }
     }
