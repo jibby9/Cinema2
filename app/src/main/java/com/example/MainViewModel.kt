@@ -1448,59 +1448,160 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun saveEpgToLocalCache(programmes: List<EpgProgramme>, sourceId: String? = null) {
-        try {
-            val id = sourceId ?: getActiveSourceId() ?: "default"
-            val file = java.io.File(getApplication<Application>().cacheDir, "epg_cache_$id.json")
-            val arr = org.json.JSONArray()
-            for (p in programmes) {
-                val obj = org.json.JSONObject()
-                obj.put("channelId", p.channelId)
-                obj.put("title", p.title)
-                obj.put("startMs", p.startMs)
-                obj.put("endMs", p.endMs)
-                obj.put("description", p.description ?: "")
-                arr.put(obj)
-            }
-            file.writeText(arr.toString())
-            Log.d(TAG, "Saved EPG local cache for $id: ${programmes.size} records saved.")
+        val id = sourceId ?: getActiveSourceId() ?: "default"
+        val file = java.io.File(getApplication<Application>().cacheDir, "epg_cache_$id.json")
+        val legacyFile = java.io.File(getApplication<Application>().cacheDir, "epg_cache.json")
 
-            // Legacy fallback syncing
-            val legacyFile = java.io.File(getApplication<Application>().cacheDir, "epg_cache.json")
-            legacyFile.writeText(arr.toString())
+        fun writeStreaming(targetFile: java.io.File) {
+            var fos: java.io.FileOutputStream? = null
+            var osw: java.io.OutputStreamWriter? = null
+            var writer: android.util.JsonWriter? = null
+            try {
+                fos = java.io.FileOutputStream(targetFile)
+                osw = java.io.OutputStreamWriter(fos, java.nio.charset.StandardCharsets.UTF_8)
+                writer = android.util.JsonWriter(osw)
+                writer.beginArray()
+                for (p in programmes) {
+                    writer.beginObject()
+                    writer.name("channelId").value(p.channelId)
+                    writer.name("title").value(p.title)
+                    writer.name("startMs").value(p.startMs)
+                    writer.name("endMs").value(p.endMs)
+                    if (p.description != null) {
+                        writer.name("description").value(p.description)
+                    } else {
+                        writer.name("description").nullValue()
+                    }
+                    writer.endObject()
+                }
+                writer.endArray()
+                writer.flush()
+            } finally {
+                try { writer?.close() } catch (ignored: Exception) {}
+                try { osw?.close() } catch (ignored: Exception) {}
+                try { fos?.close() } catch (ignored: Exception) {}
+            }
+        }
+
+        try {
+            writeStreaming(file)
+            Log.d(TAG, "Saved EPG local cache for $id: ${programmes.size} records saved via streaming writer.")
+            try {
+                writeStreaming(legacyFile)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed writing legacy fallback cache", e)
+            }
+        } catch (oom: OutOfMemoryError) {
+            Log.e(TAG, "OutOfMemoryError occurred while writing EPG cache", oom)
+            System.gc()
         } catch (e: Exception) {
             Log.e(TAG, "Failed writing EPG to local storage cache", e)
         }
     }
 
-    private fun loadEpgFromLocalCache(sourceId: String? = null): List<EpgProgramme> {
+    private suspend fun loadEpgFromLocalCache(sourceId: String? = null): List<EpgProgramme> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val list = mutableListOf<EpgProgramme>()
-        try {
-            val id = sourceId ?: getActiveSourceId() ?: "default"
-            var file = java.io.File(getApplication<Application>().cacheDir, "epg_cache_$id.json")
-            if (!file.exists()) {
-                file = java.io.File(getApplication<Application>().cacheDir, "epg_cache.json")
-            }
-            if (file.exists()) {
-                val json = file.readText()
-                val arr = org.json.JSONArray(json)
-                for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
-                    list.add(
-                        EpgProgramme(
-                            channelId = obj.getString("channelId"),
-                            title = obj.getString("title"),
-                            startMs = obj.getLong("startMs"),
-                            endMs = obj.getLong("endMs"),
-                            description = obj.optString("description").takeIf { it.isNotBlank() }
-                        )
-                    )
-                }
-                Log.d(TAG, "Loaded EPG from local storage cache for $id: ${list.size} records.")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed fetching cached EPG lists", e)
+        val id = sourceId ?: getActiveSourceId() ?: "default"
+        var file = java.io.File(getApplication<Application>().cacheDir, "epg_cache_$id.json")
+        if (!file.exists()) {
+            file = java.io.File(getApplication<Application>().cacheDir, "epg_cache.json")
         }
-        return list
+        if (!file.exists()) {
+            return@withContext list
+        }
+
+        // File size guard (40 MB)
+        val maxAllowedSize = 40 * 1024 * 1024L
+        if (file.length() > maxAllowedSize) {
+            Log.e(TAG, "Cache file for $id is too large: ${file.length()} bytes. Max allowed is $maxAllowedSize. Deleting to avoid OOM.")
+            try {
+                file.delete()
+            } catch (ignored: Exception) {}
+            return@withContext list
+        }
+
+        var fis: java.io.FileInputStream? = null
+        var isr: java.io.InputStreamReader? = null
+        var reader: android.util.JsonReader? = null
+        try {
+            fis = java.io.FileInputStream(file)
+            isr = java.io.InputStreamReader(fis, java.nio.charset.StandardCharsets.UTF_8)
+            reader = android.util.JsonReader(isr)
+
+            reader.beginArray()
+            while (reader.hasNext()) {
+                var channelId = ""
+                var title = ""
+                var startMs = 0L
+                var endMs = 0L
+                var description: String? = null
+
+                reader.beginObject()
+                while (reader.hasNext()) {
+                    val name = reader.nextName()
+                    if (reader.peek() == android.util.JsonToken.NULL) {
+                        reader.nextNull()
+                        continue
+                    }
+                    when (name) {
+                        "channelId" -> channelId = reader.nextString()
+                        "title" -> title = reader.nextString()
+                        "startMs" -> {
+                            try {
+                                startMs = reader.nextLong()
+                            } catch (ignored: Exception) {
+                                reader.skipValue()
+                            }
+                        }
+                        "endMs" -> {
+                            try {
+                                endMs = reader.nextLong()
+                            } catch (ignored: Exception) {
+                                reader.skipValue()
+                            }
+                        }
+                        "description" -> {
+                            val descStr = reader.nextString()
+                            if (descStr.isNotBlank()) {
+                                description = descStr
+                            }
+                        }
+                        else -> reader.skipValue()
+                    }
+                }
+                reader.endObject()
+
+                list.add(
+                    EpgProgramme(
+                        channelId = channelId,
+                        title = title,
+                        startMs = startMs,
+                        endMs = endMs,
+                        description = description
+                    )
+                )
+            }
+            reader.endArray()
+            Log.d(TAG, "Loaded EPG from local storage cache via stream for $id: ${list.size} records.")
+        } catch (oom: OutOfMemoryError) {
+            Log.e(TAG, "OutOfMemoryError occurred while reading local EPG cache", oom)
+            System.gc()
+            try {
+                file.delete()
+            } catch (ignored: Exception) {}
+            list.clear()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed fetching cached EPG lists due to parsing/corruption", e)
+            try {
+                file.delete()
+            } catch (ignored: Exception) {}
+            list.clear()
+        } finally {
+            try { reader?.close() } catch (ignored: Exception) {}
+            try { isr?.close() } catch (ignored: Exception) {}
+            try { fis?.close() } catch (ignored: Exception) {}
+        }
+        list
     }
 
     fun reloadEpg() {
