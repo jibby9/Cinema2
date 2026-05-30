@@ -273,6 +273,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Fallback Sample: "http://clips.vorwaerts-gmbh.de/big_buck_bunny.mp4"
     // Fallback Sample 2 (Sintel): "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4"
 
+    private val _lastEpgRefreshTime = MutableStateFlow<Long>(0L)
+    val lastEpgRefreshTime: StateFlow<Long> = _lastEpgRefreshTime.asStateFlow()
+
     private val TAG = "MainViewModel"
 
     init {
@@ -1413,9 +1416,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-
-    private val _lastEpgRefreshTime = MutableStateFlow<Long>(0L)
-    val lastEpgRefreshTime: StateFlow<Long> = _lastEpgRefreshTime.asStateFlow()
 
     fun updateLastRefreshTime() {
         _lastEpgRefreshTime.value = EpgRefreshManager.getLastRefreshTimeGlobal(getApplication())
