@@ -2,4 +2,12 @@
 <resources>
 
     <style name="Theme.MyApplication" parent="android:Theme.DeviceDefault.NoActionBar" />
+
+    <!-- Style overlay to prevent transparency crashes inside MediaRouteButton -->
+    <style name="ThemeOverlay.CastButton" parent="Theme.AppCompat.NoActionBar">
+        <!-- Force non-translucent background colors required by MediaRouterThemeHelper -->
+        <item name="android:colorBackground">#FF121212</item>
+        <item name="android:windowBackground">#FF121212</item>
+        <item name="android:colorBackgroundFloating">#FF121212</item>
+    </style>
 </resources>

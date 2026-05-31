@@ -3922,12 +3922,18 @@ fun CastRouteButton(
 ) {
     AndroidView(
         factory = { context ->
-            MediaRouteButton(context).apply {
-                try {
-                    CastButtonFactory.setUpMediaRouteButton(context, this)
-                } catch (e: Exception) {
-                    android.util.Log.e("CastRouteButton", "Error setting up MediaRouteButton", e)
+            try {
+                val themedContext = android.view.ContextThemeWrapper(context, com.example.R.style.ThemeOverlay_CastButton)
+                MediaRouteButton(themedContext).apply {
+                    try {
+                        CastButtonFactory.setUpMediaRouteButton(themedContext, this)
+                    } catch (e: Exception) {
+                        android.util.Log.e("CastRouteButton", "Error setting up MediaRouteButton", e)
+                    }
                 }
+            } catch (t: Throwable) {
+                android.util.Log.e("CastRouteButton", "Failed to create MediaRouteButton, using fallback", t)
+                android.view.View(context)
             }
         },
         modifier = modifier
