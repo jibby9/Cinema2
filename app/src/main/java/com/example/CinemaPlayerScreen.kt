@@ -40,6 +40,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.mediarouter.app.MediaRouteButton
+import com.google.android.gms.cast.framework.CastButtonFactory
 
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -760,6 +763,7 @@ fun CinemaTheaterLayout(
     // 1. Live state tracking the detected aspect ratio of the active stream
     var detectedRatio by remember { mutableStateOf(1.7777778f) } // default 16:9
     var activePlayer by remember { mutableStateOf<androidx.media3.exoplayer.ExoPlayer?>(null) }
+    val isTv by viewModel.isTvMode.collectAsState()
 
     // Ambient aspect ratio fallback when empty or on startup
     val presetRatio = AspectRatioPreset.getById(activeAspectRatioId).ratio
@@ -828,6 +832,7 @@ fun CinemaTheaterLayout(
         val aspectR = detectedRatio.coerceIn(0.3f, 3.5f) // sensible min/max bounds
         val miniWidthDp = if (maxWidth >= 600.dp) 240.dp else 180.dp
         val miniHeightDp = miniWidthDp / aspectR
+        val isWideScreenMatch = isTv && (aspectR in 1.7f..1.9f) && !isEpgGuideMode && !isMini
 
         var calculatedWidth = 0f
         var calculatedHeight = 0f
@@ -839,27 +844,32 @@ fun CinemaTheaterLayout(
             calculatedWidth = miniWidthDp.value
             calculatedHeight = miniHeightDp.value
         } else {
-            val targetAreaFraction = 0.96f
-            val targetArea = targetAreaFraction * containerAreaVal
-            val heightInit = kotlin.math.sqrt(targetArea / aspectR)
-            val widthInit = heightInit * aspectR
-
-            calculatedWidth = widthInit
-            calculatedHeight = heightInit
-
-            // Clamp to always fit perfectly within parent container constraints without distortion
-            if (calculatedWidth > containerWidthVal) {
+            if (isWideScreenMatch) {
                 calculatedWidth = containerWidthVal
-                calculatedHeight = containerWidthVal / aspectR
-            }
-            if (calculatedHeight > containerHeightVal) {
                 calculatedHeight = containerHeightVal
-                calculatedWidth = containerHeightVal * aspectR
-            }
+            } else {
+                val targetAreaFraction = 0.96f
+                val targetArea = targetAreaFraction * containerAreaVal
+                val heightInit = kotlin.math.sqrt(targetArea / aspectR)
+                val widthInit = heightInit * aspectR
 
-            // Apply a safe minimum bound to prevent potential collapsing layouts
-            calculatedWidth = calculatedWidth.coerceAtLeast(60f)
-            calculatedHeight = calculatedHeight.coerceAtLeast(60f)
+                calculatedWidth = widthInit
+                calculatedHeight = heightInit
+
+                // Clamp to always fit perfectly within parent container constraints without distortion
+                if (calculatedWidth > containerWidthVal) {
+                    calculatedWidth = containerWidthVal
+                    calculatedHeight = containerWidthVal / aspectR
+                }
+                if (calculatedHeight > containerHeightVal) {
+                    calculatedHeight = containerHeightVal
+                    calculatedWidth = containerHeightVal * aspectR
+                }
+
+                // Apply a safe minimum bound to prevent potential collapsing layouts
+                calculatedWidth = calculatedWidth.coerceAtLeast(60f)
+                calculatedHeight = calculatedHeight.coerceAtLeast(60f)
+            }
         }
 
         val playerWidth = calculatedWidth.dp
@@ -1061,6 +1071,9 @@ fun CinemaTheaterLayout(
 
         val activeDragModifier = if (isMini) miniDragModifier else dragModifier
 
+        val actualCornerShape = if (isWideScreenMatch) androidx.compose.ui.graphics.RectangleShape else cornerShape
+        val actualBackdropColor = if (isWideScreenMatch) Color.Black else themePreset.frameColor
+
         // 5. Centered/Positioned Player container frame matching chosen theme visual assets
         Box(
             modifier = Modifier
@@ -1074,7 +1087,7 @@ fun CinemaTheaterLayout(
                 .size(width = playerWidth, height = playerHeight)
                 .testTag("video_screen_container")
                 .drawBehind {
-                    if (glowIntensitySetting != AmbientGlowSetting.OFF) {
+                    if (!isWideScreenMatch && glowIntensitySetting != AmbientGlowSetting.OFF) {
                         val isMedium = glowIntensitySetting == AmbientGlowSetting.MEDIUM
                         val baseGlow = themePreset.glowRadiusDp.dp.toPx()
                         val glowRadius = if (isMedium) baseGlow * 1.6f else baseGlow
@@ -1114,20 +1127,22 @@ fun CinemaTheaterLayout(
                         }
                     }
                 }
-                .clip(cornerShape)
-                .background(themePreset.frameColor)
+                .clip(actualCornerShape)
+                .background(actualBackdropColor)
                 .then(
-                    if (isEditMode) {
+                    if (isWideScreenMatch) {
+                        Modifier
+                    } else if (isEditMode) {
                         Modifier.border(
                             width = 2.5.dp,
                             color = themePreset.primaryColor,
-                            shape = cornerShape
+                            shape = actualCornerShape
                         )
                     } else {
                         Modifier.border(
                             width = 1.dp,
                             color = Color.White.copy(alpha = 0.12f),
-                            shape = cornerShape
+                            shape = actualCornerShape
                         )
                     }
                 )
@@ -1180,16 +1195,24 @@ fun CinemaTheaterLayout(
                 .then(activeDragModifier),
             contentAlignment = Alignment.Center
         ) {
+            val actualInnerPadding = if (isWideScreenMatch) 0.dp else themePreset.frameThicknessDp.dp
+            val actualInnerShape = if (isWideScreenMatch) androidx.compose.ui.graphics.RectangleShape else RoundedCornerShape((themePreset.cornerRadiusDp - 3).coerceAtLeast(2).dp)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(themePreset.frameThicknessDp.dp)
-                    .clip(RoundedCornerShape((themePreset.cornerRadiusDp - 3).coerceAtLeast(2).dp))
+                    .padding(actualInnerPadding)
+                    .clip(actualInnerShape)
                     .background(Color.Black)
-                    .border(
-                        width = 1.dp,
-                        color = Color.White.copy(alpha = 0.08f),
-                        shape = RoundedCornerShape((themePreset.cornerRadiusDp - 3).coerceAtLeast(2).dp)
+                    .then(
+                        if (isWideScreenMatch) {
+                            Modifier
+                        } else {
+                            Modifier.border(
+                                width = 1.dp,
+                                color = Color.White.copy(alpha = 0.08f),
+                                shape = actualInnerShape
+                            )
+                        }
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -1861,6 +1884,12 @@ fun LiveInfoOverlay(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        CastRouteButton(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("google_cast_route_button")
+                        )
+
                         Button(
                             onClick = {
                                 onSelectTab(1) // Tab 1 is TV Guide tab
@@ -3886,4 +3915,22 @@ private data class SubtitleTrackInfo(
     val label: String,
     val isSelected: Boolean
 )
+
+@Composable
+fun CastRouteButton(
+    modifier: Modifier = Modifier
+) {
+    AndroidView(
+        factory = { context ->
+            MediaRouteButton(context).apply {
+                try {
+                    CastButtonFactory.setUpMediaRouteButton(context, this)
+                } catch (e: Exception) {
+                    android.util.Log.e("CastRouteButton", "Error setting up MediaRouteButton", e)
+                }
+            }
+        },
+        modifier = modifier
+    )
+}
 

@@ -42,6 +42,28 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Intent
 import android.util.Log
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.unit.Dp
+
+@Composable
+fun Modifier.tvFocusable(
+    isTv: Boolean,
+    cornerRadius: Dp = 12.dp,
+    unfocusedBorderColor: Color = Color.White.copy(alpha = 0.04f),
+    focusedBorderColor: Color = Color(0xFF6366F1)
+): Modifier {
+    if (!isTv) return this
+    var isFocused by remember { mutableStateOf(false) }
+    return this
+        .onFocusChanged { isFocused = it.isFocused }
+        .border(
+            width = if (isFocused) 2.dp else 1.dp,
+            color = if (isFocused) focusedBorderColor else unfocusedBorderColor,
+            shape = RoundedCornerShape(cornerRadius)
+        )
+        .scale(if (isFocused) 1.03f else 1f)
+}
 
 // Matches Cinema Player colors to guarantee consistent visual harmony
 private val IndigoPrimary = Color(0xFF6366F1)
@@ -221,6 +243,7 @@ fun IptvChannelsTab(
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val searchQuery by viewModel.iptvSearchQuery.collectAsState()
     val epgList by viewModel.epgProgrammes.collectAsState()
+    val isTv by viewModel.isTvMode.collectAsState()
 
     val channelSortMode by viewModel.channelSortMode.collectAsState()
     val customChannelOrder by viewModel.customChannelOrder.collectAsState()
@@ -384,7 +407,7 @@ fun IptvChannelsTab(
                         containerColor = Color.White.copy(alpha = 0.05f),
                         labelColor = TextSilver
                     ),
-                    modifier = Modifier.testTag("iptv_cat_fav")
+                    modifier = Modifier.testTag("iptv_cat_fav").tvFocusable(isTv, cornerRadius = 8.dp)
                 )
             }
 
@@ -400,7 +423,7 @@ fun IptvChannelsTab(
                         containerColor = Color.White.copy(alpha = 0.05f),
                         labelColor = TextSilver
                     ),
-                    modifier = Modifier.testTag("iptv_cat_${cat.id}")
+                    modifier = Modifier.testTag("iptv_cat_${cat.id}").tvFocusable(isTv, cornerRadius = 8.dp)
                 )
             }
         }
@@ -490,7 +513,8 @@ fun IptvChannelsTab(
                         channel = ch,
                         activeEpg = activeEpg,
                         onChannelClick = { viewModel.playIptvChannel(ch) },
-                        onFavoriteToggle = { viewModel.toggleFavoriteChannel(ch.id) }
+                        onFavoriteToggle = { viewModel.toggleFavoriteChannel(ch.id) },
+                        isTv = isTv
                     )
                 }
             }
@@ -504,14 +528,15 @@ fun IptvChannelListItem(
     activeEpg: EpgProgramme?,
     onChannelClick: () -> Unit,
     onFavoriteToggle: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isTv: Boolean = false
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(Color.White.copy(alpha = 0.03f))
-            .border(1.dp, Color.White.copy(alpha = 0.04f), RoundedCornerShape(12.dp))
+            .tvFocusable(isTv, cornerRadius = 12.dp)
             .clickable { onChannelClick() }
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,

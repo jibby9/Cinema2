@@ -96,6 +96,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastPlayedCategorySession: String? = initialPreferences.second
     private var isInitialCategoryRestored = false
 
+    // Casting states
+    private val _isCasting = MutableStateFlow(false)
+    val isCasting: StateFlow<Boolean> = _isCasting.asStateFlow()
+
+    private val _castDeviceName = MutableStateFlow<String?>(null)
+    val castDeviceName: StateFlow<String?> = _castDeviceName.asStateFlow()
+
+    // TV mode states
+    private val _isTvMode = MutableStateFlow(false)
+    val isTvMode: StateFlow<Boolean> = _isTvMode.asStateFlow()
+
     private val _customBgUri = MutableStateFlow<String?>(null)
     val customBgUri: StateFlow<String?> = _customBgUri.asStateFlow()
 
@@ -309,6 +320,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         updateLastRefreshTime()
+        // Auto-detect TV Mode environment
+        try {
+            val uiModeManager = application.getSystemService(android.content.Context.UI_MODE_SERVICE) as? android.app.UiModeManager
+            val isTelevision = uiModeManager?.currentModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
+            val isLeanback = application.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)
+            _isTvMode.value = isTelevision || isLeanback
+            Log.d(TAG, "TV Mode detected on startup: ${_isTvMode.value}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to detect TV mode", e)
+        }
+
         // Load custom themes from storage at VM start
         try {
             val loadedCustomThemes = CustomThemePersistence.loadThemes(application)
@@ -778,6 +800,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun playIptvChannel(channel: IptvChannel) {
         _currentPlayingChannel.value = channel
         setPlayableUri(channel.streamUrl)
+
+        if (_isCasting.value) {
+            castPlayChannel(channel.streamUrl, channel.name, if (channel.categoryId.isNotBlank()) channel.categoryId else "IPTV Stream")
+        }
         
         addToIptvHistory(channel)
 
@@ -791,6 +817,66 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val activeXtream = _xtreamAccounts.value.find { it.isActive }
         if (activeXtream != null) {
             fetchXtreamEpgForChannel(channel.id)
+        }
+    }
+
+    private var activeCastSession: com.google.android.gms.cast.framework.CastSession? = null
+
+    fun setCastSession(session: com.google.android.gms.cast.framework.CastSession?) {
+        activeCastSession = session
+        val connected = session != null && session.isConnected
+        _isCasting.value = connected
+        _castDeviceName.value = if (connected) session?.castDevice?.friendlyName else null
+        if (connected && session != null) {
+            val url = _playableUri.value
+            val ch = _currentPlayingChannel.value
+            if (!url.isNullOrBlank() && ch != null) {
+                castPlayChannel(url, ch.name, if (ch.categoryId.isNotBlank()) ch.categoryId else "IPTV Stream")
+            }
+        }
+    }
+
+    fun castPlayChannel(videoUrl: String, title: String, subtitle: String) {
+        val session = activeCastSession ?: return
+        val remoteMediaClient = session.remoteMediaClient ?: return
+        try {
+            val mediaMetadata = com.google.android.gms.cast.MediaMetadata(com.google.android.gms.cast.MediaMetadata.MEDIA_TYPE_MOVIE).apply {
+                putString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE, title)
+                putString(com.google.android.gms.cast.MediaMetadata.KEY_SUBTITLE, subtitle)
+            }
+            val mediaInfo = com.google.android.gms.cast.MediaInfo.Builder(videoUrl)
+                .setStreamType(com.google.android.gms.cast.MediaInfo.STREAM_TYPE_LIVE)
+                .setContentType("application/x-mpegurl")
+                .setMetadata(mediaMetadata)
+                .build()
+            remoteMediaClient.load(com.google.android.gms.cast.MediaLoadRequestData.Builder()
+                .setMediaInfo(mediaInfo)
+                .setAutoplay(true)
+                .build())
+        } catch (e: Exception) {
+            Log.e(TAG, "Cast load failed", e)
+        }
+    }
+
+    fun castPlay() { 
+        try {
+            activeCastSession?.remoteMediaClient?.play() 
+        } catch (e: Exception) {
+            Log.e(TAG, "Cast play failed", e)
+        }
+    }
+    fun castPause() { 
+        try {
+            activeCastSession?.remoteMediaClient?.pause() 
+        } catch (e: Exception) {
+            Log.e(TAG, "Cast pause failed", e)
+        }
+    }
+    fun castStop() { 
+        try {
+            activeCastSession?.remoteMediaClient?.stop() 
+        } catch (e: Exception) {
+            Log.e(TAG, "Cast stop failed", e)
         }
     }
 

@@ -53,6 +53,10 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+
+        <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="com.example.CastOptionsProvider" />
     </application>
 
 </manifest>
