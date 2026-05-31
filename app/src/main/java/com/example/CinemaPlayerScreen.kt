@@ -670,6 +670,13 @@ fun CinemaTitleBar(
             }
         },
         actions = {
+            CastRouteButton(
+                modifier = Modifier
+                    .size(36.dp)
+                    .padding(end = 4.dp)
+                    .testTag("global_cast_route_button")
+            )
+
             // IPTV Live Client Quick Toggle Selector
             IconButton(
                 onClick = { 
