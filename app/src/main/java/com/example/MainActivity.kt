@@ -13,7 +13,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.ViewModelProvider
 import com.example.ui.theme.MyApplicationTheme
 
-class MainActivity : androidx.activity.ComponentActivity() {
+class MainActivity : androidx.fragment.app.FragmentActivity() {
     private lateinit var viewModel: MainViewModel
     private var castContext: com.google.android.gms.cast.framework.CastContext? = null
     private var sessionManagerListener: com.google.android.gms.cast.framework.SessionManagerListener<com.google.android.gms.cast.framework.CastSession>? = null
