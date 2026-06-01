@@ -103,6 +103,71 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _castDeviceName = MutableStateFlow<String?>(null)
     val castDeviceName: StateFlow<String?> = _castDeviceName.asStateFlow()
 
+    // LG webOS Casting / Beaming states
+    val lgWebOsProvider by lazy { LgWebOsProvider(getApplication()) }
+
+    private val _isLgCasting = MutableStateFlow(false)
+    val isLgCasting: StateFlow<Boolean> = _isLgCasting.asStateFlow()
+
+    private val _lgCastDeviceName = MutableStateFlow<String?>(null)
+    val lgCastDeviceName: StateFlow<String?> = _lgCastDeviceName.asStateFlow()
+
+    val lgDiscoveredDevices: StateFlow<List<CastDevice>> by lazy { lgWebOsProvider.discoveredDevices }
+    val isLgScanning: StateFlow<Boolean> by lazy { lgWebOsProvider.isScanning }
+
+    fun startLgScan() {
+        lgWebOsProvider.startDiscovery()
+    }
+
+    fun stopLgScan() {
+        lgWebOsProvider.stopDiscovery()
+    }
+
+    fun connectToLgDevice(device: CastDevice, onResult: (Boolean) -> Unit) {
+        lgWebOsProvider.connect(device) { success ->
+            _isLgCasting.value = success
+            _lgCastDeviceName.value = if (success) device.name else null
+            onResult(success)
+            if (success) {
+                // Instantly beam if media is loaded
+                beamCurrentMediaToLg()
+            }
+        }
+    }
+
+    fun disconnectFromLgDevice() {
+        lgWebOsProvider.disconnect()
+        _isLgCasting.value = false
+        _lgCastDeviceName.value = null
+    }
+
+    fun addManualLgTvIp(ip: String) {
+        lgWebOsProvider.addManualIpDevice(ip)
+    }
+
+    fun beamCurrentMediaToLg() {
+        val url = _playableUri.value ?: return
+        val ch = _currentPlayingChannel.value
+        val title = ch?.name ?: "IPTV Stream"
+        val subtitle = if (ch?.categoryId?.isNotBlank() == true) ch.categoryId else "Live TV"
+        val logoUrl = ch?.logoUrl
+
+        lgWebOsProvider.beamCurrentMedia(
+            videoUrl = url,
+            title = title,
+            subtitle = subtitle,
+            logoUrl = logoUrl,
+            isLive = true
+        ) { success ->
+            if (success) {
+                Log.i("MainViewModel", "Successfully beamed current media stream to LG TV")
+            } else {
+                Log.e("MainViewModel", "Failed to beam current media stream to LG TV")
+            }
+        }
+    }
+
+
     // TV mode states
     private val _isTvMode = MutableStateFlow(false)
     val isTvMode: StateFlow<Boolean> = _isTvMode.asStateFlow()

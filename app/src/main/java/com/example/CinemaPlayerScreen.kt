@@ -11,6 +11,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -214,6 +216,7 @@ fun CinemaPlayerScreen(
             containerColor = Color.Transparent,
             topBar = {
                 CinemaTitleBar(
+                    viewModel = viewModel,
                     onToggleDebug = { viewModel.toggleDebugPanel() },
                     showDebugPanel = showDebugPanel,
                     isFoldableActive = isExpandedLayout,
@@ -618,6 +621,7 @@ fun CinemaPlayerScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CinemaTitleBar(
+    viewModel: MainViewModel,
     onToggleDebug: () -> Unit,
     showDebugPanel: Boolean,
     isFoldableActive: Boolean,
@@ -675,6 +679,13 @@ fun CinemaTitleBar(
                     .size(36.dp)
                     .padding(end = 4.dp)
                     .testTag("global_cast_route_button")
+            )
+
+            LgCastButton(
+                viewModel = viewModel,
+                modifier = Modifier
+                    .size(38.dp)
+                    .padding(end = 4.dp)
             )
 
             // IPTV Live Client Quick Toggle Selector
@@ -3944,6 +3955,343 @@ fun CastRouteButton(
             }
         },
         modifier = modifier
+    )
+}
+
+@Composable
+fun LgCastButton(
+    viewModel: MainViewModel,
+    modifier: Modifier = Modifier
+) {
+    val isConnected by viewModel.isLgCasting.collectAsState()
+    var showDialog by remember { mutableStateOf(false) }
+
+    IconButton(
+        onClick = { showDialog = true },
+        modifier = modifier.testTag("lg_cast_button")
+    ) {
+        Icon(
+            imageVector = if (isConnected) Icons.Default.CastConnected else Icons.Default.Cast,
+            contentDescription = "LG webOS Co-Cast",
+            tint = if (isConnected) IndigoPrimary else Color.White
+        )
+    }
+
+    if (showDialog) {
+        LgCastDialog(
+            viewModel = viewModel,
+            onDismiss = { showDialog = false }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LgCastDialog(
+    viewModel: MainViewModel,
+    onDismiss: () -> Unit
+) {
+    val discoveredDevices by viewModel.lgDiscoveredDevices.collectAsState()
+    val isScanning by viewModel.isLgScanning.collectAsState()
+    val connectedDevice by viewModel.lgWebOsProvider.connectedDevice.collectAsState()
+    val currentUri by viewModel.playableUri.collectAsState()
+
+    var manualIp by remember { mutableStateOf("") }
+    var actionStatusMessage by remember { mutableStateOf<String?>(null) }
+
+    DisposableEffect(Unit) {
+        viewModel.startLgScan()
+        onDispose {
+            viewModel.stopLgScan()
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Tv,
+                    contentDescription = null,
+                    tint = IndigoPrimary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Text(
+                    text = "LG Smart TV Beam Screen",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White
+                )
+            }
+        },
+        containerColor = ObsidianSurface,
+        textContentColor = Color.White,
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                if (currentUri.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Red.copy(alpha = 0.15f))
+                            .border(1.dp, Color.Red.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                            .padding(10.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.Info, contentDescription = null, tint = Color.Red)
+                            Text(
+                                text = "Load any channel or media stream first, then beam it to play on your LG TV.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.9f)
+                            )
+                        }
+                    }
+                }
+
+                if (connectedDevice != null) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.White.copy(alpha = 0.05f))
+                            .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "ACTIVE DEVICE CONNECTION",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = IndigoBadgeText
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = connectedDevice!!.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "IP: ${connectedDevice!!.ipAddress}:${connectedDevice!!.port}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray
+                                )
+                            }
+                            
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Button(
+                                    onClick = {
+                                        if (currentUri.isNullOrBlank()) {
+                                            actionStatusMessage = "No media stream is currently loaded."
+                                        } else {
+                                            viewModel.beamCurrentMediaToLg()
+                                            actionStatusMessage = "Beaming stream to ${connectedDevice!!.name}..."
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text("Beam Now", fontSize = 12.sp)
+                                }
+                                
+                                TextButton(
+                                    onClick = { 
+                                        viewModel.disconnectFromLgDevice() 
+                                        actionStatusMessage = "Disconnected."
+                                    }
+                                ) {
+                                    Text("Disconnect", color = Color.Red, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (actionStatusMessage != null) {
+                    Text(
+                        text = actionStatusMessage!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = IndigoBadgeText,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+                }
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "DISCOVERED LG TVs",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = IndigoBadgeText
+                        )
+                        if (isScanning) {
+                            Text(
+                                text = "Scanning Wi-Fi...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray
+                            )
+                        } else {
+                            TextButton(
+                                onClick = { viewModel.startLgScan() },
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(12.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Rescan", fontSize = 11.sp, color = IndigoPrimary)
+                            }
+                        }
+                    }
+
+                    if (discoveredDevices.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(80.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.02f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Searching local network... Or add manual IP below.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 180.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(discoveredDevices) { device ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (connectedDevice?.ipAddress == device.ipAddress) Color.White.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.04f))
+                                        .clickable {
+                                            viewModel.connectToLgDevice(device) { success ->
+                                                actionStatusMessage = if (success) {
+                                                    "Successfully connected to ${device.name}!"
+                                                } else {
+                                                    "Connection failed. Verify TV is powered on."
+                                                }
+                                            }
+                                        }
+                                        .padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = device.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = "${device.ipAddress}:${device.port}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.Tv,
+                                        contentDescription = null,
+                                        tint = if (connectedDevice?.ipAddress == device.ipAddress) IndigoPrimary else Color.LightGray,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "CAN'T FIND YOUR TV? CONNECT BY IP ADDRESS",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = IndigoBadgeText
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = manualIp,
+                            onValueChange = { manualIp = it },
+                            placeholder = { Text("e.g. 192.168.1.100", fontSize = 12.sp) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = IndigoPrimary,
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            modifier = Modifier
+                                .weight(1.3f)
+                                .height(48.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        Button(
+                            onClick = {
+                                val targetIp = manualIp.trim()
+                                if (targetIp.isNotBlank()) {
+                                    viewModel.addManualLgTvIp(targetIp)
+                                    val manualDevice = GenericCastDevice(
+                                        id = "lg_webos_${targetIp.replace(".", "_")}",
+                                        name = "LG TV (Manual: $targetIp)",
+                                        ipAddress = targetIp,
+                                        port = 1301,
+                                        deviceType = "LG_WEBOS"
+                                    )
+                                    viewModel.connectToLgDevice(manualDevice) { connected ->
+                                        actionStatusMessage = if (connected) "Connected to manual IP successfully!" else "Failed. Verify IP is correct."
+                                    }
+                                    manualIp = ""
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.1f)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(48.dp)
+                        ) {
+                            Text("Pair TV", color = Color.White, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = Color.White)
+            }
+        }
     )
 }
 
