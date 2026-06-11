@@ -281,7 +281,7 @@ fun CinemaPlayerScreen(
                         modifier = Modifier.fillMaxSize().padding(paddingValues)
                     )
                 } else if (isIptvModeActive) {
-                    // Symmetrical 3-Column Unfolded Balanced Layout
+                    // Symmetrical 2-Pane Unfolded Layout (Player on Left, Guide/Menu on Right)
                     Row(
                         modifier = Modifier
                             .fillMaxSize()
@@ -289,42 +289,13 @@ fun CinemaPlayerScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (showDebugPanel) {
-                            // Left Column (width W): Compact Channels List
-                            Card(
-                                modifier = Modifier
-                                    .weight(0.28f)
-                                    .fillMaxHeight()
-                                    .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 16.dp),
-                                shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
-                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
-                            ) {
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(Color.White.copy(alpha = 0.02f))
-                                            .padding(12.dp)
-                                    ) {
-                                        Text(
-                                            text = "CHANNELS",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = IndigoBadgeText
-                                        )
-                                    }
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        IptvChannelsTab(viewModel = viewModel)
-                                    }
-                                }
-                            }
-
-                            // Center Column (width C): Video Player perfectly aligned in the middle crease
+                            // Left Pane: Dominant Player Area (Guaranteed minimum width, stable size and aspect ratio)
                             Box(
                                 modifier = Modifier
-                                    .weight(0.44f)
+                                    .weight(0.65f)
+                                    .widthIn(min = 480.dp)
                                     .fillMaxHeight()
-                                    .padding(vertical = 8.dp),
+                                    .padding(vertical = 8.dp, horizontal = 12.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 CinemaTheaterLayout(
@@ -364,41 +335,29 @@ fun CinemaPlayerScreen(
                                 )
                             }
 
-                            // Right Column (width W): TV Guide & Settings Dashboard pane
+                            // Right Pane: Channels & TV Guide Menu Panel (Constrained scrollable sidebar)
                             Card(
                                 modifier = Modifier
-                                    .weight(0.28f)
+                                    .weight(0.35f)
+                                    .widthIn(max = 420.dp, min = 300.dp)
                                     .fillMaxHeight()
-                                    .padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+                                    .padding(start = 4.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
                                 shape = RoundedCornerShape(20.dp),
                                 colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
                                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
                             ) {
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(Color.White.copy(alpha = 0.02f))
-                                            .padding(12.dp)
-                                    ) {
-                                        Text(
-                                            text = "TV GUIDE",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = IndigoBadgeText
-                                        )
-                                    }
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        IptvDashboard(
-                                            viewModel = viewModel,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    }
-                                }
+                                IptvDashboard(
+                                    viewModel = viewModel,
+                                    modifier = Modifier.fillMaxSize()
+                                )
                             }
                         } else {
                             // Expand player to full width
-                            Box(modifier = Modifier.fillMaxSize()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(vertical = 8.dp, horizontal = 16.dp)
+                            ) {
                                 CinemaTheaterLayout(
                                     viewModel = viewModel,
                                     themePreset = activeThemePreset,
