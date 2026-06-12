@@ -96,23 +96,75 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastPlayedCategorySession: String? = initialPreferences.second
     private var isInitialCategoryRestored = false
 
-    // Posture and generic communication states
-    private val _isFoldedLayout = MutableStateFlow(false)
-    val isFoldedLayout: StateFlow<Boolean> = _isFoldedLayout.asStateFlow()
+    // Casting states
+    private val _isCasting = MutableStateFlow(false)
+    val isCasting: StateFlow<Boolean> = _isCasting.asStateFlow()
 
-    fun setIsFoldedLayout(isFolded: Boolean) {
-        _isFoldedLayout.value = isFolded
+    private val _castDeviceName = MutableStateFlow<String?>(null)
+    val castDeviceName: StateFlow<String?> = _castDeviceName.asStateFlow()
+
+    // LG webOS Casting / Beaming states
+    val lgWebOsProvider by lazy { LgWebOsProvider(getApplication()) }
+
+    private val _isLgCasting = MutableStateFlow(false)
+    val isLgCasting: StateFlow<Boolean> = _isLgCasting.asStateFlow()
+
+    private val _lgCastDeviceName = MutableStateFlow<String?>(null)
+    val lgCastDeviceName: StateFlow<String?> = _lgCastDeviceName.asStateFlow()
+
+    val lgDiscoveredDevices: StateFlow<List<CastDevice>> by lazy { lgWebOsProvider.discoveredDevices }
+    val isLgScanning: StateFlow<Boolean> by lazy { lgWebOsProvider.isScanning }
+
+    fun startLgScan() {
+        lgWebOsProvider.startDiscovery()
     }
 
-    private val _toastMessage = MutableStateFlow<String?>(null)
-    val toastMessage: StateFlow<String?> = _toastMessage.asStateFlow()
-
-    fun clearToastMessage() {
-        _toastMessage.value = null
+    fun stopLgScan() {
+        lgWebOsProvider.stopDiscovery()
     }
 
-    fun setToastMessage(message: String) {
-        _toastMessage.value = message
+    fun connectToLgDevice(device: CastDevice, onResult: (Boolean) -> Unit) {
+        lgWebOsProvider.connect(device) { success ->
+            _isLgCasting.value = success
+            _lgCastDeviceName.value = if (success) device.name else null
+            onResult(success)
+            if (success) {
+                // Instantly beam if media is loaded
+                beamCurrentMediaToLg()
+            }
+        }
+    }
+
+    fun disconnectFromLgDevice() {
+        lgWebOsProvider.disconnect()
+        _isLgCasting.value = false
+        _lgCastDeviceName.value = null
+    }
+
+    fun addManualLgTvIp(ip: String) {
+        lgWebOsProvider.addManualIpDevice(ip)
+    }
+
+    fun beamCurrentMediaToLg() {
+        val url = _playableUri.value ?: return
+        val ch = _currentPlayingChannel.value
+        val title = ch?.name ?: "IPTV Stream"
+        val subtitle = if (ch?.categoryId?.isNotBlank() == true) ch.categoryId else "Live TV"
+        val logoUrl = ch?.logoUrl
+
+        lgWebOsProvider.beamCurrentMedia(
+            videoUrl = url,
+            title = title,
+            subtitle = subtitle,
+            logoUrl = logoUrl,
+            isLive = true
+        ) { success ->
+            if (success) {
+                Log.i("MainViewModel", "Successfully beamed current media stream to LG TV")
+            } else {
+                Log.e("MainViewModel", "Failed to beam current media stream to LG TV")
+            }
+        }
     }
 
 
@@ -143,6 +195,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Default video stream URL for test playback
     val defaultTestVideoUrl = "https://sandbox-videos.web.cern.ch/record/2241796"
+
+    // Foldable and Screen Layout States
+    private val _isExpandedLayout = MutableStateFlow(true)
+    val isExpandedLayout: StateFlow<Boolean> = _isExpandedLayout.asStateFlow()
+
+    fun setIsExpandedLayout(isExpanded: Boolean) {
+        _isExpandedLayout.value = isExpanded
+    }
+
+    private val _unfoldPrompt = MutableStateFlow<String?>(null)
+    val unfoldPrompt: StateFlow<String?> = _unfoldPrompt.asStateFlow()
+
+    fun clearUnfoldPrompt() {
+        _unfoldPrompt.value = null
+    }
 
     // IPTV States
     private val _isIptvModeActive = MutableStateFlow(false)
@@ -811,12 +878,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playIptvChannel(channel: IptvChannel) {
-        if (_isFoldedLayout.value) {
-            _toastMessage.value = "Unfold your screen to watch this channel"
+        if (!_isExpandedLayout.value) {
+            _unfoldPrompt.value = "Unfold your screen to watch"
             return
         }
         _currentPlayingChannel.value = channel
         setPlayableUri(channel.streamUrl)
+
+        if (_isCasting.value) {
+            castPlayChannel(channel.streamUrl, channel.name, if (channel.categoryId.isNotBlank()) channel.categoryId else "IPTV Stream")
+        }
         
         addToIptvHistory(channel)
 
@@ -830,6 +901,131 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val activeXtream = _xtreamAccounts.value.find { it.isActive }
         if (activeXtream != null) {
             fetchXtreamEpgForChannel(channel.id)
+        }
+    }
+
+    private var activeCastSession: com.google.android.gms.cast.framework.CastSession? = null
+
+    fun setCastSession(session: com.google.android.gms.cast.framework.CastSession?) {
+        activeCastSession = session
+        val connected = session != null && session.isConnected
+        _isCasting.value = connected
+        _castDeviceName.value = if (connected) session?.castDevice?.friendlyName else null
+        if (connected && session != null) {
+            val url = _playableUri.value
+            val ch = _currentPlayingChannel.value
+            if (!url.isNullOrBlank() && ch != null) {
+                castPlayChannel(url, ch.name, if (ch.categoryId.isNotBlank()) ch.categoryId else "IPTV Stream")
+            }
+        }
+    }
+
+    fun castPlayChannel(videoUrl: String, title: String, subtitle: String) {
+        val session = activeCastSession ?: return
+        val remoteMediaClient = session.remoteMediaClient ?: return
+        try {
+            // Determine the stream's MIME type dynamically
+            val lowerUrl = videoUrl.lowercase()
+            val mimeType = when {
+                lowerUrl.contains(".m3u8") || lowerUrl.contains("m3u8") -> "application/vnd.apple.mpegurl"
+                lowerUrl.contains(".mpd") || lowerUrl.contains("mpd") -> "application/dash+xml"
+                lowerUrl.contains(".mp4") || lowerUrl.contains("mp4") -> "video/mp4"
+                lowerUrl.contains(".ts") || lowerUrl.endsWith(".ts") -> "video/mp2t"
+                lowerUrl.contains(".mp3") -> "audio/mpeg"
+                else -> "application/x-mpegurl" // standard fallback for unknown IPTV live streams
+            }
+
+            // Map stream type based on IPTV mode or keywords
+            val isLiveStream = _isIptvModeActive.value || lowerUrl.contains("live") || lowerUrl.contains("playlist.m3u8")
+            val streamType = if (isLiveStream) {
+                com.google.android.gms.cast.MediaInfo.STREAM_TYPE_LIVE
+            } else {
+                com.google.android.gms.cast.MediaInfo.STREAM_TYPE_BUFFERED
+            }
+
+            // Diagnostic checks & logging warnings for common Chromecast failures
+            val isSecure = videoUrl.startsWith("https://", ignoreCase = true)
+            if (!isSecure) {
+                Log.w("IPTVCast", "WARNING: Cast stream URL uses insecure HTTP ('$videoUrl'). Many updated Chromecast devices strictly forbid, block, or fail to resolve non-secure HTTP content due to remote media browser restrictions. Strongly consider using secure HTTPS URLs.")
+            }
+            
+            // Note on Auth Headers / Custom User-Agents:
+            // IPTV providers often require specific custom HTTP request headers (such as 'User-Agent', custom auth tokens or referrers)
+            // that our local app passes to ExoPlayer. Since the standard Cast receiver runs independently on the TV browser
+            // (default media receiver CC1AD845), it cannot mimic these custom headers, leading to a HTTP 403 Forbidden (Black Screen).
+            if (lowerUrl.contains("username=") && lowerUrl.contains("password=")) {
+                Log.i("IPTVCast", "Detected authenticated playlist stream query params. Ensure the target web receiver supports cross-origin credentials and query-param propagation.")
+            }
+
+            // Diagnostic Test/Fallback Path:
+            // If the user's stream fails or is suspected to be incompatible, we support loading a guaranteed compatible HLS test stream
+            var finalVideoUrl = videoUrl
+            val isDiagnoseOnly = videoUrl.contains("test_cast", ignoreCase = true) || videoUrl.contains("diagnose", ignoreCase = true)
+            if (isDiagnoseOnly) {
+                finalVideoUrl = "https://storage.googleapis.com/shaka-demo-assets/angel-one-hls/hls.m3u8"
+                Log.i("IPTVCast", "Diagnostic test mode active: substituting video stream with safe Google Cast compatible test stream: $finalVideoUrl")
+            }
+
+            Log.i("IPTVCast", "Initiating Cast Load Request:")
+            Log.i("IPTVCast", "  - Stream Title: $title")
+            Log.i("IPTVCast", "  - Subtitle: $subtitle")
+            Log.i("IPTVCast", "  - URL: $finalVideoUrl")
+            Log.i("IPTVCast", "  - MIME Type: $mimeType")
+            Log.i("IPTVCast", "  - Stream Type: ${if (streamType == com.google.android.gms.cast.MediaInfo.STREAM_TYPE_LIVE) "LIVE" else "BUFFERED"}")
+
+            val mediaMetadata = com.google.android.gms.cast.MediaMetadata(com.google.android.gms.cast.MediaMetadata.MEDIA_TYPE_MOVIE).apply {
+                putString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE, title)
+                putString(com.google.android.gms.cast.MediaMetadata.KEY_SUBTITLE, subtitle)
+                // Add default placeholder artwork if helpful
+            }
+
+            val mediaInfo = com.google.android.gms.cast.MediaInfo.Builder(finalVideoUrl)
+                .setStreamType(streamType)
+                .setContentType(mimeType)
+                .setMetadata(mediaMetadata)
+                .build()
+
+            val pendingResult = remoteMediaClient.load(
+                com.google.android.gms.cast.MediaLoadRequestData.Builder()
+                    .setMediaInfo(mediaInfo)
+                    .setAutoplay(true)
+                    .build()
+            )
+
+            pendingResult.setResultCallback { result ->
+                val status = result.status
+                if (status.isSuccess) {
+                    Log.i("IPTVCast", "SUCCESS: Load request sent successfully. Stream should be rendering on external device.")
+                } else {
+                    Log.e("IPTVCast", "FAILED: Receiver rejected load request. Status message: ${status.statusMessage} (Code: ${status.statusCode})")
+                    Log.e("IPTVCast", "Hint: Verify if the TV's network is blocked from the IPTV source domain or if CORS headers 'Access-Control-Allow-Origin: *' are correctly served.")
+                }
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Cast load operation threw an exception", e)
+        }
+    }
+
+    fun castPlay() { 
+        try {
+            activeCastSession?.remoteMediaClient?.play() 
+        } catch (e: Exception) {
+            Log.e(TAG, "Cast play failed", e)
+        }
+    }
+    fun castPause() { 
+        try {
+            activeCastSession?.remoteMediaClient?.pause() 
+        } catch (e: Exception) {
+            Log.e(TAG, "Cast pause failed", e)
+        }
+    }
+    fun castStop() { 
+        try {
+            activeCastSession?.remoteMediaClient?.stop() 
+        } catch (e: Exception) {
+            Log.e(TAG, "Cast stop failed", e)
         }
     }
 

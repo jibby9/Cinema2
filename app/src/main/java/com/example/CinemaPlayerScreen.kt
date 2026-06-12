@@ -42,6 +42,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.mediarouter.app.MediaRouteButton
+import com.google.android.gms.cast.framework.CastButtonFactory
 
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -195,15 +198,15 @@ fun CinemaPlayerScreen(
     // Screen classification: if screenWidthDp >= 600, treat as tablet or unfolded foldable inner display.
     val isExpandedLayout = configuration.screenWidthDp >= 600
 
-    androidx.compose.runtime.LaunchedEffect(isExpandedLayout) {
-        viewModel.setIsFoldedLayout(!isExpandedLayout)
+    LaunchedEffect(isExpandedLayout) {
+        viewModel.setIsExpandedLayout(isExpandedLayout)
     }
 
-    val toastMessage by viewModel.toastMessage.collectAsState()
-    androidx.compose.runtime.LaunchedEffect(toastMessage) {
-        toastMessage?.let { msg ->
-            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
-            viewModel.clearToastMessage()
+    val unfoldPrompt by viewModel.unfoldPrompt.collectAsState()
+    LaunchedEffect(unfoldPrompt) {
+        unfoldPrompt?.let { msg ->
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+            viewModel.clearUnfoldPrompt()
         }
     }
 
@@ -220,256 +223,214 @@ fun CinemaPlayerScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        if (isExpandedLayout) {
-            // UNFOLDED MODE
-            Scaffold(
-                containerColor = Color.Transparent,
-                topBar = {
-                    CinemaTitleBar(
-                        viewModel = viewModel,
-                        onToggleDebug = { viewModel.toggleDebugPanel() },
-                        showDebugPanel = showDebugPanel,
-                        isFoldableActive = true,
-                        activeThemeName = activeThemePreset.name,
-                        isIptvActive = isIptvModeActive,
-                        onToggleIptv = { viewModel.setIptvModeActive(it) }
-                    )
-                }
-            ) { paddingValues ->
-                val isFullScreenGuide = isIptvModeActive && showDebugPanel && activeIptvTab == 1
+        // Main Scaffold Layout containing Top Bar and dynamic adaptive play elements
+        Scaffold(
+            containerColor = Color.Transparent,
+            topBar = {
+                CinemaTitleBar(
+                    viewModel = viewModel,
+                    onToggleDebug = { viewModel.toggleDebugPanel() },
+                    showDebugPanel = showDebugPanel,
+                    isFoldableActive = isExpandedLayout,
+                    activeThemeName = activeThemePreset.name,
+                    isIptvActive = isIptvModeActive,
+                    onToggleIptv = { viewModel.setIptvModeActive(it) }
+                )
+            }
+        ) { paddingValues ->
+            val isFullScreenGuide = isIptvModeActive && showDebugPanel && activeIptvTab == 1
 
-                if (isFullScreenGuide) {
-                    FullscreenSkyGuide(
-                        viewModel = viewModel,
-                        onCloseGuide = { viewModel.setDebugPanelVisible(false) },
-                        mediaPlayerContent = {
-                            CinemaTheaterLayout(
-                                viewModel = viewModel,
-                                themePreset = activeThemePreset,
-                                screenLayout = screenLayout.copy(dimAlpha = 0f),
-                                playableUri = playableUri,
-                                errorMessage = errorMessage,
-                                headers = requestHeaders,
-                                onPlayTestVideo = { viewModel.playTestVideo() },
-                                onClearPlaySource = { viewModel.setPlayableUri(null) },
-                                onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
-                                isEditMode = false,
-                                activeAspectRatioId = activeAspectRatioId,
-                                activeResizeMode = activeResizeMode,
-                                onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
-                                isSettingsLoaded = isSettingsLoaded,
-                                isIptvActive = isIptvModeActive,
-                                channels = iptvChannels,
-                                epgList = epgProgrammes,
-                                currentPlayingChannel = currentPlayingChannel,
-                                onPlayChannel = { ch -> viewModel.playIptvChannel(ch) },
-                                onPlayNextChannel = { list -> viewModel.playNextIptvChannel(list) },
-                                onPlayPreviousChannel = { list -> viewModel.playPreviousIptvChannel(list) },
-                                onRecallPreviousChannel = { viewModel.recallPreviousIptvChannel() },
-                                glowIntensitySetting = AmbientGlowSetting.OFF,
-                                showDebugPanel = showDebugPanel,
-                                onToggleDebug = { viewModel.toggleDebugPanel() },
-                                onSelectTab = { tab -> viewModel.setActiveIptvTab(tab) },
-                                onLayoutChanged = { _, _, _, _ -> },
-                                isEpgGuideMode = true,
-                                isAnimationEnabled = isAnimationEnabled,
-                                onToggleAnimation = { enabled -> viewModel.setAnimationEnabled(enabled) },
-                                onSelectTheme = { id -> viewModel.selectTheme(id) },
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        },
-                        modifier = Modifier.fillMaxSize().padding(paddingValues)
-                    )
-                } else if (isIptvModeActive) {
-                    // Symmetrical 2-Pane Unfolded Layout (Player on Left, Guide/Menu on Right)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(paddingValues),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (showDebugPanel) {
-                            // Left Pane: Dominant Player Area (Guaranteed minimum width, stable size and aspect ratio)
-                            Box(
-                                modifier = Modifier
-                                    .weight(0.65f)
-                                    .widthIn(min = 480.dp)
-                                    .fillMaxHeight()
-                                    .padding(vertical = 8.dp, horizontal = 12.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CinemaTheaterLayout(
-                                    viewModel = viewModel,
-                                    themePreset = activeThemePreset,
-                                    screenLayout = screenLayout,
-                                    playableUri = playableUri,
-                                    errorMessage = errorMessage,
-                                    headers = requestHeaders,
-                                    onPlayTestVideo = { viewModel.playTestVideo() },
-                                    onClearPlaySource = { viewModel.setPlayableUri(null) },
-                                    onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
-                                    isEditMode = isEditMode,
-                                    activeAspectRatioId = activeAspectRatioId,
-                                    activeResizeMode = activeResizeMode,
-                                    onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
-                                    isSettingsLoaded = isSettingsLoaded,
-                                    isIptvActive = isIptvModeActive,
-                                    channels = iptvChannels,
-                                    epgList = epgProgrammes,
-                                    currentPlayingChannel = currentPlayingChannel,
-                                    onPlayChannel = { ch -> viewModel.playIptvChannel(ch) },
-                                    onPlayNextChannel = { list -> viewModel.playNextIptvChannel(list) },
-                                    onPlayPreviousChannel = { list -> viewModel.playPreviousIptvChannel(list) },
-                                    onRecallPreviousChannel = { viewModel.recallPreviousIptvChannel() },
-                                    glowIntensitySetting = glowIntensitySetting,
-                                    showDebugPanel = showDebugPanel,
-                                    onToggleDebug = { viewModel.toggleDebugPanel() },
-                                    onSelectTab = { tab -> viewModel.setActiveIptvTab(tab) },
-                                    onLayoutChanged = { left, top, width, height ->
-                                        viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
-                                    },
-                                    isAnimationEnabled = isAnimationEnabled,
-                                    onToggleAnimation = { enabled -> viewModel.setAnimationEnabled(enabled) },
-                                    onSelectTheme = { id -> viewModel.selectTheme(id) },
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-
-                            // Right Pane: Channels & TV Guide Menu Panel (Constrained scrollable sidebar)
-                            Card(
-                                modifier = Modifier
-                                    .weight(0.35f)
-                                    .widthIn(max = 420.dp, min = 300.dp)
-                                    .fillMaxHeight()
-                                    .padding(start = 4.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
-                                shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
-                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
-                            ) {
-                                IptvDashboard(
-                                    viewModel = viewModel,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                        } else {
-                            // Expand player to full width
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(vertical = 8.dp, horizontal = 16.dp)
-                            ) {
-                                CinemaTheaterLayout(
-                                    viewModel = viewModel,
-                                    themePreset = activeThemePreset,
-                                    screenLayout = screenLayout,
-                                    playableUri = playableUri,
-                                    errorMessage = errorMessage,
-                                    headers = requestHeaders,
-                                    onPlayTestVideo = { viewModel.playTestVideo() },
-                                    onClearPlaySource = { viewModel.setPlayableUri(null) },
-                                    onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
-                                    isEditMode = isEditMode,
-                                    activeAspectRatioId = activeAspectRatioId,
-                                    activeResizeMode = activeResizeMode,
-                                    onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
-                                    isSettingsLoaded = isSettingsLoaded,
-                                    isIptvActive = isIptvModeActive,
-                                    channels = iptvChannels,
-                                    epgList = epgProgrammes,
-                                    currentPlayingChannel = currentPlayingChannel,
-                                    onPlayChannel = { ch -> viewModel.playIptvChannel(ch) },
-                                    onPlayNextChannel = { list -> viewModel.playNextIptvChannel(list) },
-                                    onPlayPreviousChannel = { list -> viewModel.playPreviousIptvChannel(list) },
-                                    onRecallPreviousChannel = { viewModel.recallPreviousIptvChannel() },
-                                    glowIntensitySetting = glowIntensitySetting,
-                                    showDebugPanel = showDebugPanel,
-                                    onToggleDebug = { viewModel.toggleDebugPanel() },
-                                    onSelectTab = { tab -> viewModel.setActiveIptvTab(tab) },
-                                    onLayoutChanged = { left, top, width, height ->
-                                        viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
-                                    },
-                                    isAnimationEnabled = isAnimationEnabled,
-                                    onToggleAnimation = { enabled -> viewModel.setAnimationEnabled(enabled) },
-                                    onSelectTheme = { id -> viewModel.selectTheme(id) },
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    // Standard non-IPTV player layout
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(paddingValues)
-                    ) {
+            if (isFullScreenGuide) {
+                FullscreenSkyGuide(
+                    viewModel = viewModel,
+                    onCloseGuide = { viewModel.setDebugPanelVisible(false) },
+                    mediaPlayerContent = {
                         CinemaTheaterLayout(
                             viewModel = viewModel,
                             themePreset = activeThemePreset,
-                            screenLayout = screenLayout,
+                            screenLayout = screenLayout.copy(dimAlpha = 0f),
                             playableUri = playableUri,
                             errorMessage = errorMessage,
                             headers = requestHeaders,
                             onPlayTestVideo = { viewModel.playTestVideo() },
                             onClearPlaySource = { viewModel.setPlayableUri(null) },
                             onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
-                            isEditMode = isEditMode,
+                            isEditMode = false,
                             activeAspectRatioId = activeAspectRatioId,
                             activeResizeMode = activeResizeMode,
                             onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
                             isSettingsLoaded = isSettingsLoaded,
-                            isIptvActive = false,
-                            channels = emptyList(),
-                            epgList = emptyList(),
-                            currentPlayingChannel = null,
-                            onPlayChannel = {},
-                            onPlayNextChannel = {},
-                            onPlayPreviousChannel = {},
-                            onRecallPreviousChannel = {},
-                            glowIntensitySetting = glowIntensitySetting,
+                            isIptvActive = isIptvModeActive,
+                            channels = iptvChannels,
+                            epgList = epgProgrammes,
+                            currentPlayingChannel = currentPlayingChannel,
+                            onPlayChannel = { ch -> viewModel.playIptvChannel(ch) },
+                            onPlayNextChannel = { list -> viewModel.playNextIptvChannel(list) },
+                            onPlayPreviousChannel = { list -> viewModel.playPreviousIptvChannel(list) },
+                            onRecallPreviousChannel = { viewModel.recallPreviousIptvChannel() },
+                            glowIntensitySetting = AmbientGlowSetting.OFF,
                             showDebugPanel = showDebugPanel,
                             onToggleDebug = { viewModel.toggleDebugPanel() },
-                            onSelectTab = {},
-                            onLayoutChanged = { left, top, width, height ->
-                                viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
-                            },
+                            onSelectTab = { tab -> viewModel.setActiveIptvTab(tab) },
+                            onLayoutChanged = { _, _, _, _ -> },
+                            isEpgGuideMode = true,
                             isAnimationEnabled = isAnimationEnabled,
                             onToggleAnimation = { enabled -> viewModel.setAnimationEnabled(enabled) },
                             onSelectTheme = { id -> viewModel.selectTheme(id) },
                             modifier = Modifier.fillMaxSize()
                         )
-                    }
-                }
-            }
-        } else {
-            // FOLDED / COMPACT MODE: Show only a compact TV guide UI, prioritizing channel browsing only.
-            Scaffold(
-                containerColor = Color.Transparent,
-                topBar = {
-                    CinemaTitleBar(
-                        viewModel = viewModel,
-                        onToggleDebug = {},
-                        showDebugPanel = false,
-                        isFoldableActive = false,
-                        activeThemeName = activeThemePreset.name,
-                        isIptvActive = isIptvModeActive,
-                        onToggleIptv = { viewModel.setIptvModeActive(it) }
-                    )
-                }
-            ) { paddingValues ->
-                Card(
+                    },
+                    modifier = Modifier.fillMaxSize().padding(paddingValues)
+                )
+            } else if (isExpandedLayout && isIptvModeActive) {
+                // PREMIUM FOLD MULTI-PANE LAYOUT (Visually centered relative to whole display, sitting exactly between symmetric panes)
+                Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(paddingValues)
-                        .padding(16.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+                        .padding(paddingValues),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IptvDashboard(
-                        viewModel = viewModel,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    // Left Pane: Symmetrical Channel Browser
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = showDebugPanel,
+                        enter = androidx.compose.animation.slideInHorizontally(initialOffsetX = { -it }) + androidx.compose.animation.fadeIn(),
+                        exit = androidx.compose.animation.slideOutHorizontally(targetOffsetX = { -it }) + androidx.compose.animation.fadeOut(),
+                        modifier = Modifier
+                            .weight(0.35f)
+                            .fillMaxHeight()
+                            .padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 16.dp)
+                    ) {
+                        Card(
+                            modifier = Modifier.fillMaxSize(),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+                        ) {
+                            IptvChannelsTab(
+                                viewModel = viewModel,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+
+                    // Centered Video Player (Perfectly centered on the fold hinge line)
+                    Box(
+                        modifier = Modifier
+                            .weight(if (showDebugPanel) 0.65f else 1f)
+                            .fillMaxHeight(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CinemaTheaterLayout(
+                             viewModel = viewModel,
+                             themePreset = activeThemePreset,
+                             screenLayout = screenLayout,
+                             playableUri = playableUri,
+                             errorMessage = errorMessage,
+                             headers = requestHeaders,
+                             onPlayTestVideo = { viewModel.playTestVideo() },
+                             onClearPlaySource = { viewModel.setPlayableUri(null) },
+                             onPlaybackError = { detail -> viewModel.setErrorMessage(detail) },
+                             isEditMode = isEditMode,
+                             activeAspectRatioId = activeAspectRatioId,
+                             activeResizeMode = activeResizeMode,
+                             onSelectResizeMode = { mode -> viewModel.selectResizeMode(mode) },
+                             isSettingsLoaded = isSettingsLoaded,
+                             isIptvActive = isIptvModeActive,
+                             channels = iptvChannels,
+                             epgList = epgProgrammes,
+                             currentPlayingChannel = currentPlayingChannel,
+                             onPlayChannel = { ch -> viewModel.playIptvChannel(ch) },
+                             onPlayNextChannel = { list -> viewModel.playNextIptvChannel(list) },
+                             onPlayPreviousChannel = { list -> viewModel.playPreviousIptvChannel(list) },
+                             onRecallPreviousChannel = { viewModel.recallPreviousIptvChannel() },
+                             glowIntensitySetting = glowIntensitySetting,
+                             showDebugPanel = showDebugPanel,
+                             onToggleDebug = { viewModel.toggleDebugPanel() },
+                             onSelectTab = { tab -> viewModel.setActiveIptvTab(tab) },
+                             onLayoutChanged = { left, top, width, height ->
+                                 viewModel.updateScreenLayout(left, top, width, height, screenLayout.dimAlpha)
+                             },
+                             isAnimationEnabled = isAnimationEnabled,
+                             onToggleAnimation = { enabled -> viewModel.setAnimationEnabled(enabled) },
+                             onSelectTheme = { id -> viewModel.selectTheme(id) },
+                             modifier = Modifier.fillMaxSize()
+                         )
+                    }
+
+                    // Right Pane: TV Guide Dashboard
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = showDebugPanel,
+                        enter = androidx.compose.animation.slideInHorizontally(initialOffsetX = { it }) + androidx.compose.animation.fadeIn(),
+                        exit = androidx.compose.animation.slideOutHorizontally(targetOffsetX = { it }) + androidx.compose.animation.fadeOut(),
+                        modifier = Modifier
+                            .weight(0.35f)
+                            .fillMaxHeight()
+                            .padding(start = 8.dp, end = 16.dp, top = 16.dp, bottom = 16.dp)
+                    ) {
+                        Card(
+                            modifier = Modifier.fillMaxSize(),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+                        ) {
+                            IptvDashboard(
+                                viewModel = viewModel,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                }
+            } else {
+                // FOLDED / COMPACT MODE: Show only a compact TV guide with no video player layout
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(ObsidianSurface)
+                        .padding(bottom = 16.dp)
+                ) {
+                    val m3uPlaylists by viewModel.m3uPlaylists.collectAsState()
+                    val xtreamAccounts by viewModel.xtreamAccounts.collectAsState()
+                    val countsActive = xtreamAccounts.any { it.isActive } || m3uPlaylists.any { it.isActive }
+
+                    if (!countsActive) {
+                        Box(
+                            modifier = Modifier.fillMaxSize().padding(24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Tv,
+                                    contentDescription = null,
+                                    tint = TextMuted,
+                                    modifier = Modifier.size(64.dp)
+                                )
+                                Text(
+                                    text = "No IPTV Sources Active",
+                                    color = Color.White,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Please unfold your device's screen to configure or select your IPTV sources.",
+                                    color = TextSilver.copy(alpha = 0.7f),
+                                    fontSize = 13.sp,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(horizontal = 24.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        // The browsable TV EPG Guide (without the full player layout)
+                        IptvGuideTab(
+                            viewModel = viewModel,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .statusBarsPadding()
+                        )
+                    }
                 }
             }
         }
@@ -568,7 +529,6 @@ fun CinemaPlayerScreen(
 /**
  * Modern Material 3 style title bar matching "Sophisticated Dark" aesthetic.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CinemaTitleBar(
     viewModel: MainViewModel,
@@ -579,100 +539,77 @@ fun CinemaTitleBar(
     isIptvActive: Boolean,
     onToggleIptv: (Boolean) -> Unit
 ) {
-    CenterAlignedTopAppBar(
-        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-            containerColor = Color.Transparent,
-            titleContentColor = Color.White
-        ),
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (isIptvActive) IndigoPrimary else IndigoSecondary)
-                        .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (isIptvActive) Icons.Default.Tv else Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .height(52.dp)
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        CastRouteButton(
+            modifier = Modifier
+                .size(36.dp)
+                .padding(end = 4.dp)
+                .testTag("global_cast_route_button")
+        )
+
+        LgCastButton(
+            viewModel = viewModel,
+            modifier = Modifier
+                .size(38.dp)
+                .padding(end = 4.dp)
+        )
+
+        // IPTV Live Client Quick Toggle Selector
+        IconButton(
+            onClick = { 
+                onToggleIptv(!isIptvActive)
+                // If turning on, ensure panel is visible to browse streams
+                if (!isIptvActive && !showDebugPanel) {
+                    onToggleDebug()
                 }
-
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = if (isIptvActive) "Live TV Stream" else "Media Player",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.SemiBold,
-                            letterSpacing = (-0.5).sp,
-                            fontFamily = FontFamily.SansSerif
-                        )
-                    )
-                    Text(
-                        text = if (isIptvActive) "Built-in IPTV engine" else "Theme: $activeThemeName",
-                        color = Color.LightGray.copy(alpha = 0.6f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Normal
-                    )
-                }
-            }
-        },
-        actions = {
-            // IPTV Live Client Quick Toggle Selector
-            IconButton(
-                onClick = { 
-                    onToggleIptv(!isIptvActive)
-                    // If turning on, ensure panel is visible to browse streams
-                    if (!isIptvActive && !showDebugPanel) {
-                        onToggleDebug()
-                    }
-                },
-                modifier = Modifier.testTag("iptv_mode_toggle_btn")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Tv,
-                    contentDescription = "Toggle IPTV Mode",
-                    tint = if (isIptvActive) IndigoPrimary else Color.LightGray,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .padding(end = 4.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.08f))
-                    .border(1.dp, Color.White.copy(alpha = 0.1f), CircleShape)
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    text = if (isFoldableActive) "Foldable: Active" else "Compact Display",
-                    color = IndigoBadgeText,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp
-                )
-            }
-
-            IconButton(
-                onClick = onToggleDebug,
-                modifier = Modifier.testTag("debug_console_toggle")
-            ) {
-                Icon(
-                    imageVector = if (showDebugPanel) Icons.Default.Tune else Icons.Default.Info,
-                    contentDescription = "Toggle Control Panel",
-                    tint = if (showDebugPanel) IndigoPrimary else Color.LightGray,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
+            },
+            modifier = Modifier.testTag("iptv_mode_toggle_btn")
+        ) {
+            Icon(
+                imageVector = Icons.Default.Tv,
+                contentDescription = "Toggle IPTV Mode",
+                tint = if (isIptvActive) IndigoPrimary else Color.LightGray,
+                modifier = Modifier.size(22.dp)
+            )
         }
-    )
+
+        Box(
+            modifier = Modifier
+                .padding(end = 4.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.08f))
+                .border(1.dp, Color.White.copy(alpha = 0.1f), CircleShape)
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+        ) {
+            Text(
+                text = if (isFoldableActive) "Foldable: Active" else "Compact Display",
+                color = IndigoBadgeText,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp
+            )
+        }
+
+        IconButton(
+            onClick = onToggleDebug,
+            modifier = Modifier.testTag("debug_console_toggle")
+        ) {
+            Icon(
+                imageVector = if (showDebugPanel) Icons.Default.Tune else Icons.Default.Info,
+                contentDescription = "Toggle Control Panel",
+                tint = if (showDebugPanel) IndigoPrimary else Color.LightGray,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
 }
 
 /**
@@ -1838,6 +1775,11 @@ fun LiveInfoOverlay(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        CastRouteButton(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("google_cast_route_button")
+                        )
 
                         Button(
                             onClick = {
@@ -3865,5 +3807,364 @@ private data class SubtitleTrackInfo(
     val isSelected: Boolean
 )
 
+@Composable
+fun CastRouteButton(
+    modifier: Modifier = Modifier
+) {
+    AndroidView(
+        factory = { context ->
+            try {
+                val themedContext = android.view.ContextThemeWrapper(context, com.example.R.style.ThemeOverlay_CastButton)
+                MediaRouteButton(themedContext).apply {
+                    try {
+                        CastButtonFactory.setUpMediaRouteButton(themedContext, this)
+                    } catch (e: Exception) {
+                        android.util.Log.e("CastRouteButton", "Error setting up MediaRouteButton", e)
+                    }
+                }
+            } catch (t: Throwable) {
+                android.util.Log.e("CastRouteButton", "Failed to create MediaRouteButton, using fallback", t)
+                android.view.View(context)
+            }
+        },
+        modifier = modifier
+    )
+}
 
+@Composable
+fun LgCastButton(
+    viewModel: MainViewModel,
+    modifier: Modifier = Modifier
+) {
+    val isConnected by viewModel.isLgCasting.collectAsState()
+    var showDialog by remember { mutableStateOf(false) }
+
+    IconButton(
+        onClick = { showDialog = true },
+        modifier = modifier.testTag("lg_cast_button")
+    ) {
+        Icon(
+            imageVector = if (isConnected) Icons.Default.CastConnected else Icons.Default.Cast,
+            contentDescription = "LG webOS Co-Cast",
+            tint = if (isConnected) IndigoPrimary else Color.White
+        )
+    }
+
+    if (showDialog) {
+        LgCastDialog(
+            viewModel = viewModel,
+            onDismiss = { showDialog = false }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LgCastDialog(
+    viewModel: MainViewModel,
+    onDismiss: () -> Unit
+) {
+    val discoveredDevices by viewModel.lgDiscoveredDevices.collectAsState()
+    val isScanning by viewModel.isLgScanning.collectAsState()
+    val connectedDevice by viewModel.lgWebOsProvider.connectedDevice.collectAsState()
+    val currentUri by viewModel.playableUri.collectAsState()
+
+    var manualIp by remember { mutableStateOf("") }
+    var actionStatusMessage by remember { mutableStateOf<String?>(null) }
+
+    DisposableEffect(Unit) {
+        viewModel.startLgScan()
+        onDispose {
+            viewModel.stopLgScan()
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Tv,
+                    contentDescription = null,
+                    tint = IndigoPrimary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Text(
+                    text = "LG Smart TV Beam Screen",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White
+                )
+            }
+        },
+        containerColor = ObsidianSurface,
+        textContentColor = Color.White,
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                if (currentUri.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Red.copy(alpha = 0.15f))
+                            .border(1.dp, Color.Red.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                            .padding(10.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.Info, contentDescription = null, tint = Color.Red)
+                            Text(
+                                text = "Load any channel or media stream first, then beam it to play on your LG TV.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.9f)
+                            )
+                        }
+                    }
+                }
+
+                if (connectedDevice != null) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.White.copy(alpha = 0.05f))
+                            .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "ACTIVE DEVICE CONNECTION",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = IndigoBadgeText
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = connectedDevice!!.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "IP: ${connectedDevice!!.ipAddress}:${connectedDevice!!.port}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray
+                                )
+                            }
+                            
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Button(
+                                    onClick = {
+                                        if (currentUri.isNullOrBlank()) {
+                                            actionStatusMessage = "No media stream is currently loaded."
+                                        } else {
+                                            viewModel.beamCurrentMediaToLg()
+                                            actionStatusMessage = "Beaming stream to ${connectedDevice!!.name}..."
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text("Beam Now", fontSize = 12.sp)
+                                }
+                                
+                                TextButton(
+                                    onClick = { 
+                                        viewModel.disconnectFromLgDevice() 
+                                        actionStatusMessage = "Disconnected."
+                                    }
+                                ) {
+                                    Text("Disconnect", color = Color.Red, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (actionStatusMessage != null) {
+                    Text(
+                        text = actionStatusMessage!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = IndigoBadgeText,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+                }
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "DISCOVERED LG TVs",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = IndigoBadgeText
+                        )
+                        if (isScanning) {
+                            Text(
+                                text = "Scanning Wi-Fi...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray
+                            )
+                        } else {
+                            TextButton(
+                                onClick = { viewModel.startLgScan() },
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(12.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Rescan", fontSize = 11.sp, color = IndigoPrimary)
+                            }
+                        }
+                    }
+
+                    if (discoveredDevices.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(80.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.02f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Searching local network... Or add manual IP below.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 180.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(discoveredDevices) { device ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (connectedDevice?.ipAddress == device.ipAddress) Color.White.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.04f))
+                                        .clickable {
+                                            viewModel.connectToLgDevice(device) { success ->
+                                                actionStatusMessage = if (success) {
+                                                    "Successfully connected to ${device.name}!"
+                                                } else {
+                                                    "Connection failed. Verify TV is powered on."
+                                                }
+                                            }
+                                        }
+                                        .padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = device.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = "${device.ipAddress}:${device.port}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.Tv,
+                                        contentDescription = null,
+                                        tint = if (connectedDevice?.ipAddress == device.ipAddress) IndigoPrimary else Color.LightGray,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "CAN'T FIND YOUR TV? CONNECT BY IP ADDRESS",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = IndigoBadgeText
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = manualIp,
+                            onValueChange = { manualIp = it },
+                            placeholder = { Text("e.g. 192.168.1.100", fontSize = 12.sp) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = IndigoPrimary,
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            modifier = Modifier
+                                .weight(1.3f)
+                                .height(48.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        Button(
+                            onClick = {
+                                val targetIp = manualIp.trim()
+                                if (targetIp.isNotBlank()) {
+                                    viewModel.addManualLgTvIp(targetIp)
+                                    val manualDevice = GenericCastDevice(
+                                        id = "lg_webos_${targetIp.replace(".", "_")}",
+                                        name = "LG TV (Manual: $targetIp)",
+                                        ipAddress = targetIp,
+                                        port = 1301,
+                                        deviceType = "LG_WEBOS"
+                                    )
+                                    viewModel.connectToLgDevice(manualDevice) { connected ->
+                                        actionStatusMessage = if (connected) "Connected to manual IP successfully!" else "Failed. Verify IP is correct."
+                                    }
+                                    manualIp = ""
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.1f)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(48.dp)
+                        ) {
+                            Text("Pair TV", color = Color.White, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = Color.White)
+            }
+        }
+    )
+}
 
